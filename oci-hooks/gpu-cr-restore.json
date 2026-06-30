@@ -1,0 +1,12 @@
+{
+  "version": "1.0.0",
+  "hook": {
+    "path": "/usr/local/lib/gpu-cr-restore/hooks/gpu-cr-restore-hook"
+  },
+  "when": {
+    "annotations": {
+      "gpu-cr.io/restore": "true"
+    }
+  },
+  "stages": ["poststart"]
+}

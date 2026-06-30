@@ -1,15 +1,17 @@
-# Restore a checkpointed GPU workload into a NEW Pod on a chosen node.
+# Restore a checkpointed GPU workload into a NEW Pod on a chosen node, using the
+# Custom CRI-O native restore path (no custom RuntimeClass needed).
 #
-# Flow this triggers:
-#   1) you apply this Pod         (Restore Pod yaml)
-#   2) nodeSelector pins the node (experiment: explicit target node)
-#   3) kubelet -> CRI-O (gpu-cr-restore handler / our shim)
-#   2.5) shim stages Checkpoint.tar from checkpoint-uri onto the node
-#   4) crun restore  (CRIU: container + CPU process)
-#   5) GPU control-state restore (cuda-checkpoint --restore via host helper)
-#   6) GPU data-buffer remap (interceptor: same VA + H2D)
-#   7) workload resumes
-#   8) CRI-O/kubelet register it as a normal Running container
+# How it works:
+#   - container `image` is the checkpoint archive PATH on the node. CRI-O detects
+#     a local archive and drives a CRIU restore (CRImportCheckpoint).
+#   - gpu-cr.io/checkpoint-uri tells the patched CRI-O where to STAGE that archive
+#     from first (so a node that doesn't have it yet — migration — gets it). For a
+#     same-node restore where the tar already exists, the URI can equal the image.
+#   - the gpu-cr-restore OCI poststart hook then restores GPU control state + data.
+#
+# Flow: 1 apply -> 2 node (nodeSelector) -> 2.5 CRI-O stages tar -> 3 kubelet/CRI-O
+#       -> 4 CRIU restore -> 5 GPU control (hook) -> 6 GPU data remap (hook)
+#       -> 7 resume -> 8 registered Running.
 apiVersion: v1
 kind: Pod
 metadata:
@@ -17,31 +19,24 @@ metadata:
   namespace: default
   annotations:
     gpu-cr.io/restore: "true"
-    # Where the Checkpoint.tar is. Same-node restore: hostpath:// (the checkpoint
-    # backend dir, /var/lib/gcr-checkpoint, present on every node). Cross-node
-    # migration: file:// after pre-staging, nfs://, or https://.
     gpu-cr.io/checkpoint-uri: "hostpath:///var/lib/gcr-checkpoint/Checkpoint.tar"
-    # UID of the ORIGINAL (checkpointed) Pod. The in-Pod interceptor watches a
-    # control channel keyed by this UID (CRIU restores the original env), so the
-    # shim must signal the data-buffer remap on this key. Read it from the source
-    # Pod: `kubectl get pod <src> -o jsonpath='{.metadata.uid}'`.
+    # UID of the ORIGINAL checkpointed Pod — the in-Pod interceptor watches a
+    # control channel keyed by this UID (CRIU restores the original env). Get it:
+    #   kubectl get pod <src> -o jsonpath='{.metadata.uid}'
     gpu-cr.io/source-pod-uid: "REPLACE_WITH_SOURCE_POD_UID"
 spec:
-  runtimeClassName: gpu-cr-restore
-  # Scheduler step: experiment pins the target node explicitly.
+  # Experiment: pin the target node explicitly (no scheduler integration yet).
   nodeSelector:
     kubernetes.io/hostname: jsj-worker-1
   restartPolicy: Never
   containers:
     - name: vllm
-      # Must be the image the checkpoint was taken from (CRIU restores into a
-      # compatible rootfs).
-      image: pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+      # The container image IS the checkpoint archive on the node. CRI-O stages
+      # it from checkpoint-uri (above) before restore, so this local path exists.
+      image: /var/lib/gpu-cr/restore/vllm-Checkpoint.tar
       resources:
         limits:
           nvidia.com/gpu: "1"
-      # The interceptor library + control channel must be present for the GPU
-      # data remap, exactly as on the checkpoint side.
       volumeMounts:
         - name: gpu-cr-lib
           mountPath: /opt/gpu-cr

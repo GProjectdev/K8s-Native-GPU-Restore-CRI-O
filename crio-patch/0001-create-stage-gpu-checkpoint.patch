@@ -1,0 +1,19 @@
+diff --git a/server/container_create.go b/server/container_create.go
+index 82fe249..9b779d3 100644
+--- a/server/container_create.go
++++ b/server/container_create.go
+@@ -409,6 +409,14 @@ func (s *Server) CreateContainer(ctx context.Context, req *types.CreateContainer
+ 
+ 	log.Infof(ctx, "Creating container: %s", oci.LabelsToDescription(req.GetConfig().GetLabels()))
+ 
++	// gpu-cr: if this Pod requests a GPU checkpoint restore (gpu-cr.io/restore),
++	// stage the referenced Checkpoint.tar onto this node and rewrite the image to
++	// the local archive so the checkpoint detection below picks it up. No-op for
++	// non-restore containers. See server/gpu_cr_restore.go.
++	if err := s.stageGPUCheckpoint(ctx, req.GetConfig()); err != nil {
++		return nil, fmt.Errorf("gpu-cr staging: %w", err)
++	}
++
+ 	// Check if image is a file. If it is a file it might be a checkpoint archive.
+ 	checkpointImage, err := func() (bool, error) {
+ 		if !s.config.CheckpointRestore() {

@@ -1,52 +1,33 @@
-# Experiment Guide — GPU Restore (CRI-O)
+# Experiment Guide — GPU Restore (Custom CRI-O)
 
-English mirror of `docs/SETUP.ko.md`. Restores a `Checkpoint.tar` (produced by the
-checkpoint system) into a new Pod. Verified target: K8s v1.33 + CRI-O v1.33,
-NVIDIA driver 570+, crun.
+English summary of `docs/SETUP.ko.md`. Restores a `Checkpoint.tar` into a new Pod
+via a patched CRI-O (v1.35.0) native restore path. Target: K8s v1.33+, driver 570+.
 
-## 0. Prerequisites
-- The checkpoint system is installed and a `Checkpoint.tar` exists.
-- Each GPU worker has: driver 570+, `cuda-checkpoint`, CRIU, crun,
-  CRI-O with `enable_criu_support`, the `gpu-cr-cuda-helper.service` host helper
-  (handling `restore <pid>`), the interceptor lib at
-  `/var/lib/gpu-cr/lib/libgcr-interceptor.so`, and the NVIDIA device plugin.
-
-## 1. Install the runtime handler (each GPU worker)
+## 1. Build the Custom CRI-O (once)
 ```bash
 git clone https://github.com/GProjectdev/K8s-Native-GPU-Restore-CRI-O.git
-cd K8s-Native-GPU-Restore-CRI-O
-sudo ./scripts/install-crio-runtime.sh
+cd K8s-Native-GPU-Restore-CRI-O && ./hack/build-crio.sh
 ```
 
-## 2. Register the RuntimeClass (once per cluster)
+## 2. Install on each GPU worker
 ```bash
-kubectl apply -f config/runtimeclass.yaml
+sudo install -m0755 /tmp/cri-o-gpu-cr/bin/crio "$(command -v crio)"
+sudo ./scripts/install-node.sh
+sudo systemctl restart crio
 ```
 
-## 3. Stage the checkpoint
-Same-node restore: the tar is already in `/var/lib/gcr-checkpoint`. Cross-node
-migration: move the tar to the target node, or use an `nfs://` / `https://` URI.
-Get the source Pod UID (data-remap signal key):
-```bash
-kubectl get pod <source-pod> -o jsonpath='{.metadata.uid}'
-```
+## 3. Stage + restore
+Get the source Pod UID (`kubectl get pod <src> -o jsonpath='{.metadata.uid}'`),
+fill `deploy/sample-restore-pod-l1.yaml` (source-pod-uid, checkpoint-uri, image,
+nodeSelector), then `kubectl apply -f` it.
 
-## 4. Apply the restore Pod
-Fill `REPLACE_WITH_SOURCE_POD_UID`, `checkpoint-uri`, and the `nodeSelector`
-hostname in `deploy/sample-restore-pod-l1.yaml`, then:
+## 4. Verify
 ```bash
-kubectl apply -f deploy/sample-restore-pod-l1.yaml
-kubectl get pod restore-cuda-l1 -w
-```
-
-## 5. Verify
-```bash
-kubectl get pod restore-cuda-l1 -o wide
-sudo journalctl -u crio | grep gpu-cr-restore | tail -40
+sudo journalctl -u crio | grep gpu-cr | tail
 kubectl logs restore-cuda-l1 | tail -5   # checksum ... OK
 ```
-Expect, in order: `staged checkpoint`, `CRIU restore done`,
-`host helper restore ok`, `interceptor remap ack`, and a matching checksum.
+Expect: `gpu-cr: staged checkpoint`, native CRIU restore, then the poststart hook
+`host helper restore ok` + `interceptor remap ack`, and a matching checksum.
 
-## 6. Troubleshooting
-See `docs/SETUP.ko.md` for the troubleshooting table.
+A fork-free runtime-shim alternative lives in `alt-shim/` (less robust). See
+`docs/DESIGN.ko.md` for the approach comparison and honest unverified points.

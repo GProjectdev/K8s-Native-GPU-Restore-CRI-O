@@ -1,14 +1,14 @@
-# Convenience targets for the gpu-cr-restore runtime handler.
 SHELL := /bin/bash
-SCRIPTS := runtime/gpu-cr-restore-shim runtime/lib/*.sh scripts/*.sh
+SCRIPTS := hooks/gpu-cr-restore-hook hooks/lib/*.sh hack/*.sh scripts/*.sh \
+           alt-shim/runtime/gpu-cr-restore-shim alt-shim/runtime/lib/*.sh alt-shim/*.sh
 
-.PHONY: lint install uninstall
-lint:        ## syntax-check all shell sources (+ shellcheck if available)
+.PHONY: lint build-crio install-node
+lint:           ## syntax-check shell + verify the patch applies to cri-o v1.35.0
 	@for f in $(SCRIPTS); do bash -n "$$f" && echo "ok: $$f"; done
-	@command -v shellcheck >/dev/null 2>&1 && shellcheck -S warning $(SCRIPTS) || echo "(shellcheck not installed; skipped)"
+	@command -v shellcheck >/dev/null 2>&1 && shellcheck -S warning $(SCRIPTS) || echo "(shellcheck skipped)"
 
-install:     ## install the runtime handler on this node (root)
-	sudo ./scripts/install-crio-runtime.sh
+build-crio:     ## clone cri-o v1.35.0, apply the patch, build the binary
+	./hack/build-crio.sh
 
-uninstall:   ## remove the runtime handler (root)
-	sudo ./scripts/uninstall-crio-runtime.sh
+install-node:   ## install hooks + CRI-O drop-in on this node (root)
+	sudo ./scripts/install-node.sh
