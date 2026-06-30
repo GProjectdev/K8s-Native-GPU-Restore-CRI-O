@@ -1,0 +1,40 @@
+# Level-1 restore smoke test: restore the cuda-l1 checksum workload and confirm
+# the GPU tensor checksum still matches after restore (data integrity end-to-end).
+# Pair with sample-pod-l1.yaml + sample-gpucheckpoint-l1.yaml from the checkpoint
+# repo: checkpoint cuda-l1-pod, note its UID + the produced tar, then apply this.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: restore-cuda-l1
+  namespace: default
+  labels: { app: cuda-l1-restore }
+  annotations:
+    gpu-cr.io/restore: "true"
+    gpu-cr.io/checkpoint-uri: "hostpath:///var/lib/gcr-checkpoint/Checkpoint.tar"
+    gpu-cr.io/source-pod-uid: "REPLACE_WITH_SOURCE_POD_UID"
+spec:
+  runtimeClassName: gpu-cr-restore
+  nodeSelector:
+    kubernetes.io/hostname: jsj-worker-1
+  restartPolicy: Never
+  containers:
+    - name: cuda-app
+      image: pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
+      volumeMounts:
+        - name: gpu-cr-lib
+          mountPath: /opt/gpu-cr
+          readOnly: true
+        - name: gpu-cr-run
+          mountPath: /var/lib/gpu-cr/run
+        - name: gcr-checkpoint
+          mountPath: /var/lib/gcr-checkpoint
+  volumes:
+    - name: gpu-cr-lib
+      hostPath: { path: /var/lib/gpu-cr/lib, type: Directory }
+    - name: gpu-cr-run
+      hostPath: { path: /var/lib/gpu-cr/run, type: DirectoryOrCreate }
+    - name: gcr-checkpoint
+      hostPath: { path: /var/lib/gcr-checkpoint, type: DirectoryOrCreate }

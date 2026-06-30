@@ -1,0 +1,4 @@
+# staged checkpoints / runtime state (never commit)
+/var/
+*.tar
+*.swp

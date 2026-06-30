@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# gpu-cr-restore-shim — CRI-O OCI-runtime handler for GPU checkpoint RESTORE.
+#
+# CRI-O invokes a runtime handler exactly like it invokes crun/runc:
+#
+#     gpu-cr-restore-shim [GLOBAL_OPTS] <verb> [VERB_OPTS] <container-id>
+#
+# This shim is a thin, transparent wrapper around the real `crun` (or `runc`).
+# For every verb EXCEPT `create` it just proxies through. On `create` it inspects
+# the container's OCI config.json: if the Pod carries the restore annotations
+# (gpu-cr.io/restore=true), it executes the restore pipeline (steps 2.5-8 of the
+# design) instead of a normal create:
+#
+#   2.5 stage  : fetch the Checkpoint.tar referenced by gpu-cr.io/checkpoint-uri
+#                onto this node and unpack it into an image-dir.
+#   4   CRIU   : `crun restore` re-creates the container + CPU process from the
+#                checkpoint (host-resident GPU control state + data buffers come
+#                back as ordinary process memory).
+#   5   GPU control : cuda-checkpoint --action restore re-installs CUDA contexts
+#                /streams onto the device (delegated to the host helper).
+#   6   GPU data    : signal the in-Pod GCR interceptor to remap data buffers to
+#                the SAME virtual addresses and copy host->device (H2D).
+#   7   resume      : the restored process unblocks (CUDA was suspended until 5/6).
+#   8   register    : control returns to CRI-O/kubelet, which marks the container
+#                Running like any normal container.
+#
+# Honest scope: this is an experimental, single-container, single-GPU reference.
+# See docs/DESIGN.ko.md for assumptions and the unverified interaction points.
+set -euo pipefail
+
+GCR_LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+# shellcheck source=lib/common.sh
+. "${GCR_LIBDIR}/common.sh"
+# shellcheck source=lib/stage.sh
+. "${GCR_LIBDIR}/stage.sh"
+# shellcheck source=lib/gpu-restore.sh
+. "${GCR_LIBDIR}/gpu-restore.sh"
+
+REAL_RUNTIME="${GCR_REAL_RUNTIME:-/usr/bin/crun}"
+
+# --- parse the CRI-O command line --------------------------------------------
+# crun/runc CLI: <global opts> <verb> <verb opts> <container-id>
+# We do not need to fully model it: we find the verb (first non-dashy token that
+# is a known verb) and the bundle path (for create), and otherwise pass argv
+# through untouched.
+ARGS=("$@")
+VERB=""
+BUNDLE=""
+CID=""
+i=0
+while [ $i -lt ${#ARGS[@]} ]; do
+  a="${ARGS[$i]}"
+  case "$a" in
+    create|start|state|kill|delete|exec|run|ps|pause|resume|update|checkpoint|restore|spec|list|features)
+      [ -z "$VERB" ] && VERB="$a" ;;
+    --bundle|-b)
+      i=$((i+1)); BUNDLE="${ARGS[$i]:-}" ;;
+    --bundle=*) BUNDLE="${a#--bundle=}" ;;
+    -*) : ;;             # ignore other flags
+    *) CID="$a" ;;        # last bare token is the container id
+  esac
+  i=$((i+1))
+done
+
+passthrough() { exec "${REAL_RUNTIME}" "${ARGS[@]}"; }
+
+# Only `create` may turn into a restore. Everything else proxies straight through.
+if [ "${VERB}" != "create" ]; then
+  # `start` on a container we already restored is a no-op success (the process
+  # is live after CRIU restore). The marker is written by the create/restore path.
+  if [ "${VERB}" = "start" ] && [ -n "${CID}" ] && [ -f "$(gcr_marker "${CID}")" ]; then
+    gcr_log "start: ${CID} already restored+running; ack"
+    exit 0
+  fi
+  passthrough
+fi
+
+[ -n "${BUNDLE}" ] || BUNDLE="$(pwd)"
+CONFIG="${BUNDLE}/config.json"
+[ -f "${CONFIG}" ] || passthrough
+
+# Is this a restore request?
+RESTORE="$(gcr_annotation "${CONFIG}" 'gpu-cr.io/restore')"
+if [ "${RESTORE}" != "true" ]; then
+  passthrough
+fi
+
+CKPT_URI="$(gcr_annotation "${CONFIG}" 'gpu-cr.io/checkpoint-uri')"
+SRC_UID="$(gcr_annotation "${CONFIG}" 'gpu-cr.io/source-pod-uid')"
+gcr_log "restore requested: cid=${CID} uri=${CKPT_URI} src-uid=${SRC_UID:-<none>}"
+[ -n "${CKPT_URI}" ] || gcr_die "gpu-cr.io/checkpoint-uri annotation is required for restore"
+
+# (2.5) stage the checkpoint onto this node and unpack to an image dir.
+IMAGE_DIR="$(gcr_stage_checkpoint "${CKPT_URI}" "${CID}")"
+gcr_log "staged checkpoint -> ${IMAGE_DIR}"
+
+# (4) CRIU container/CPU restore via the real runtime.
+#     crun restore re-creates the container from the checkpoint image and
+#     resumes the CPU process. CUDA remains suspended (control state evicted at
+#     checkpoint) so the app blocks on its next CUDA call until steps 5/6.
+PIDFILE="$(gcr_rundir "${CID}")/pid"
+gcr_log "CRIU restore: ${REAL_RUNTIME} restore --image-path ${IMAGE_DIR}"
+"${REAL_RUNTIME}" restore \
+  --image-path "${IMAGE_DIR}" \
+  --bundle "${BUNDLE}" \
+  --pid-file "${PIDFILE}" \
+  --detach \
+  "${CID}"
+
+NEWPID="$(cat "${PIDFILE}" 2>/dev/null || echo 0)"
+gcr_log "CRIU restore done: cid=${CID} host-pid=${NEWPID}"
+
+# (5+6+7) GPU restore: control state then data buffers, then the app resumes.
+#         Best-effort: failures are logged but do not tear down the container,
+#         so the experiment can inspect partial state.
+gcr_gpu_restore "${NEWPID}" "${SRC_UID}" || gcr_log "WARN: GPU restore step reported an error (see log)"
+
+# (8) mark restored so the subsequent `start` verb acks; CRI-O/kubelet then
+#     registers the container as Running.
+: > "$(gcr_marker "${CID}")"
+gcr_log "restore pipeline complete: cid=${CID}"
+exit 0
