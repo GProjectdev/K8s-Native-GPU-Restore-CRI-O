@@ -6,7 +6,7 @@ It is a **minimal patch on CRI-O's native restore path** (in the spirit of the
 `cri-o/cri-o` fork [`leehun-cri-o`](https://github.com/lehuannhatrang/leehun-cri-o)),
 plus an OCI hook for the GPU-specific steps.
 
-> 한국어: [README.ko.md](README.ko.md) · 설계/비교: [docs/DESIGN.ko.md](docs/DESIGN.ko.md) · 실험: [docs/SETUP.ko.md](docs/SETUP.ko.md)
+> 한국어: [README.ko.md](README.ko.md) · 사용법: [docs/USAGE.ko.md](docs/USAGE.ko.md) · 설계/비교: [docs/DESIGN.ko.md](docs/DESIGN.ko.md) · 실험: [docs/SETUP.ko.md](docs/SETUP.ko.md)
 
 ## Why a CRI-O fork (not a runtime shim)
 

@@ -7,7 +7,7 @@
 [`leehun-cri-o`](https://github.com/lehuannhatrang/leehun-cri-o)와 같은 방향) + GPU 단계용
 OCI hook.
 
-> 설계/비교: [docs/DESIGN.ko.md](docs/DESIGN.ko.md) · 실험: [docs/SETUP.ko.md](docs/SETUP.ko.md)
+> 사용법: [docs/USAGE.ko.md](docs/USAGE.ko.md) · 설계/비교: [docs/DESIGN.ko.md](docs/DESIGN.ko.md) · 실험: [docs/SETUP.ko.md](docs/SETUP.ko.md)
 
 ## 왜 shim이 아니라 CRI-O 포크인가
 
