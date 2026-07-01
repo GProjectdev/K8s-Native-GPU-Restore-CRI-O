@@ -33,6 +33,14 @@ if _, err := os.Stat(req.GetConfig().GetImage().GetImage()); err == nil {
 따라서 우리가 할 일은 단 하나: **복원 직전에 `checkpoint-uri`의 tar를 노드로 staging하고
 image를 그 로컬 경로로 바꿔** 위 감지가 성립하게 만드는 것.
 
+## 복원 컨테이너로 annotation 전파 (hook 자동 발화)
+
+CRI-O 복원(`CRImportCheckpoint`)은 컨테이너 annotation을 **체크포인트 이미지에서 다시
+만든다**(원본 annotation). 그래서 복원 Pod에 붙인 `gpu-cr.io/*`가 복원 컨테이너의 OCI
+spec에 실리지 않아, poststart hook의 `when.annotations: gpu-cr.io/restore=true` 매칭이 실패하고
+hook이 `source-pod-uid`도 못 읽는다. `0004-restore-propagate-gpu-cr-annotations.patch`가
+복원 Pod의 `gpu-cr.io/*`를 복원 컨테이너 config로 전파해 hook이 자동 발화하게 한다.
+
 ## annotation은 "샌드박스"에 담긴다 (중요)
 
 kubelet은 Pod의 임의 annotation(`gpu-cr.io/*`)을 **컨테이너가 아니라 Pod 샌드박스**

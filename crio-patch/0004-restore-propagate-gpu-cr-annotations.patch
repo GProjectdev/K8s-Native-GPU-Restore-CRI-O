@@ -1,0 +1,24 @@
+diff --git a/server/container_restore.go b/server/container_restore.go
+index ade606e..384c3c6 100644
+--- a/server/container_restore.go
++++ b/server/container_restore.go
+@@ -243,6 +243,19 @@ func (s *Server) CRImportCheckpoint(
+ 		Labels: createLabels,
+ 	}
+ 
++	// gpu-cr: propagate the restore Pod's gpu-cr.io/* annotations onto the restored
++	// container so the poststart hook (when.annotations gpu-cr.io/restore=true) fires
++	// and can read gpu-cr.io/source-pod-uid. The restore rebuilds annotations from the
++	// checkpoint image, which do NOT carry the restore request's annotations.
++	for k, v := range createConfig.GetAnnotations() {
++		if strings.HasPrefix(k, "gpu-cr.io/") {
++			if containerConfig.Annotations == nil {
++				containerConfig.Annotations = map[string]string{}
++			}
++			containerConfig.Annotations[k] = v
++		}
++	}
++
+ 	if createConfig.Linux != nil {
+ 		if createConfig.Linux.Resources != nil {
+ 			containerConfig.Linux.Resources = createConfig.Linux.Resources
