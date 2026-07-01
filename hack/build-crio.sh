@@ -69,15 +69,15 @@ fi
 echo "[build] adding server/gpu_cr_restore.go"
 cp "${REPO_DIR}/crio-patch/server/gpu_cr_restore.go" "${SRC}/server/gpu_cr_restore.go"
 
-echo "[build] applying staging patch"
-if ! git -C "${SRC}" apply "${REPO_DIR}/crio-patch/0001-create-stage-gpu-checkpoint.patch"; then
-  echo "[build] ERROR: patch did not apply to cri-o ${CRIO_VERSION}." >&2
-  echo "[build] The CreateContainer anchor likely moved in this version." >&2
-  echo "[build] Manually add this line at the top of CreateContainer (server/container_create.go)," >&2
-  echo "[build] right after the 'Creating container' log line:" >&2
-  echo "[build]     if err := s.stageGPUCheckpoint(ctx, req.GetConfig()); err != nil { return nil, fmt.Errorf(\"gpu-cr staging: %w\", err) }" >&2
-  exit 1
-fi
+echo "[build] applying gpu-cr patches"
+for p in "${REPO_DIR}"/crio-patch/*.patch; do
+  echo "[build]   apply $(basename "$p")"
+  if ! git -C "${SRC}" apply "$p"; then
+    echo "[build] ERROR: $(basename "$p") did not apply to cri-o ${CRIO_VERSION}." >&2
+    echo "[build] The anchor likely moved in this version; rebase the patch (see docs/DESIGN.ko.md)." >&2
+    exit 1
+  fi
+done
 
 echo "[build] building crio"
 make -C "${SRC}" binaries

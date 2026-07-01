@@ -1,0 +1,15 @@
+diff --git a/server/container_restore.go b/server/container_restore.go
+index ade606e..3c7d9d5 100644
+--- a/server/container_restore.go
++++ b/server/container_restore.go
+@@ -232,6 +232,10 @@ func (s *Server) CRImportCheckpoint(
+ 		},
+ 		Image: &types.ImageSpec{
+ 			Image: rootFSImage,
++			// gpu-cr: carry the caller's UserSpecifiedImage into the restore
++			// container config; without it createSandboxContainer's image
++			// signature check fails with "user specified image not specified".
++			UserSpecifiedImage: createConfig.GetImage().GetUserSpecifiedImage(),
+ 		},
+ 		Linux: &types.LinuxContainerConfig{
+ 			Resources:       &types.LinuxContainerResources{},
