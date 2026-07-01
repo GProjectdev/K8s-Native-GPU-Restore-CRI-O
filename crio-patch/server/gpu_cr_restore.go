@@ -89,7 +89,14 @@ func (s *Server) stageGPUCheckpoint(ctx context.Context, sbAnnotations map[strin
 			return fmt.Errorf("stage checkpoint %q: %w", uri, err)
 		}
 		log.Infof(ctx, "gpu-cr: staged checkpoint %q -> %s; restoring from local archive", uri, dst)
-		cfg.Image = &types.ImageSpec{Image: dst}
+		// Only swap the image PATH used for checkpoint detection; preserve the rest
+		// of the ImageSpec (notably UserSpecifiedImage, which CRI-O uses for image
+		// signature verification — clearing it triggers "user specified image not
+		// specified, cannot verify image signature").
+		if cfg.Image == nil {
+			cfg.Image = &types.ImageSpec{}
+		}
+		cfg.Image.Image = dst
 	} else {
 		log.Infof(ctx, "gpu-cr: restore without %s; using image %q as-is",
 			gpuCRURIAnnotation, cfg.GetImage().GetImage())
