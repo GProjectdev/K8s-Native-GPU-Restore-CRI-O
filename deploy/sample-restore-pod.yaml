@@ -33,7 +33,11 @@ spec:
     - name: vllm
       # The container image IS the checkpoint archive on the node. CRI-O stages
       # it from checkpoint-uri (above) before restore, so this local path exists.
-      image: /var/lib/gpu-cr/restore/vllm-Checkpoint.tar
+      # kubelet validates image as an OCI reference (a filesystem path -> InvalidImageName).
+      # Use a valid, node-present reference; the gpu-cr.io/* annotations drive the actual
+      # restore (the CRI-O patch swaps in the staged checkpoint archive internally).
+      image: pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+      imagePullPolicy: IfNotPresent
       resources:
         limits:
           nvidia.com/gpu: "1"

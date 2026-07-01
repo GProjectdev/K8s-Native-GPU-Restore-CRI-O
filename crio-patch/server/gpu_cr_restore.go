@@ -18,7 +18,14 @@ package server
 //
 // It fetches the referenced archive onto the node and rewrites the container's
 // image to the local staged path, so CRI-O's existing checkpoint detection and
-// CRIU restore pick it up unchanged. The GPU-specific control-state and
+// CRIU restore pick it up unchanged.
+//
+// NOTE (kubelet path): kubelet validates the Pod's container image as an OCI
+// reference BEFORE CRI-O is called, so a filesystem path in .image is rejected
+// with InvalidImageName. Therefore a restore Pod must set .image to a valid,
+// node-present reference (a placeholder) and drive the restore via the
+// gpu-cr.io/checkpoint-uri annotation; this function overrides .image internally
+// with the staged local archive, which kubelet never sees. The GPU-specific control-state and
 // data-buffer restore run afterwards as an OCI poststart hook (see
 // oci-hooks/gpu-cr-restore.json), so this file does not touch the device.
 //
