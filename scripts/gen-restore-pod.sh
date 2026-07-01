@@ -50,17 +50,19 @@ spec=json.load(open(sys.argv[1]))
 env=os.environ
 # Destinations CRI-O/k8s provide automatically or we already declare — skip these.
 skip_prefixes=("/proc","/sys","/dev","/etc/hostname","/etc/hosts","/etc/resolv.conf",
-               "/run/secrets/kubernetes.io","/var/run/secrets/kubernetes.io",
-               "/opt/gpu-cr","/var/lib/gpu-cr","/var/lib/gcr-checkpoint","/etc/hostname")
+               "/etc/passwd","/etc/group","/run/secrets","/run/.containerenv",
+               "/var/run/secrets",
+               "/opt/gpu-cr","/var/lib/gpu-cr","/var/lib/gcr-checkpoint")
 def skip(dst):
     return any(dst==p or dst.startswith(p+"/") or dst.startswith(p) for p in skip_prefixes)
+# NOTE: nvidia-container-cli injects its mounts with type=null (JSON) and often
+# source != destination (e.g. /usr/share/vulkan/... -> /etc/vulkan/...). We must
+# NOT filter on type; select every mount that is not a standard/k8s/instance mount
+# and whose source exists on this node, using the real source from spec.dump.
 binds=[]
 for m in spec.get("mounts",[]):
-    dst=m.get("destination",""); src=m.get("source",""); typ=m.get("type","")
+    dst=m.get("destination",""); src=m.get("source","")
     if not dst or not src: continue
-    if typ not in ("bind","none") and "bind" not in m.get("options",[]): 
-        # keep only real bind mounts (nvidia files are binds)
-        if typ!="bind": continue
     if skip(dst): continue
     if not os.path.exists(src):
         print(f"# WARNING: source missing on this node, skipping: {src} -> {dst}", file=sys.stderr)
