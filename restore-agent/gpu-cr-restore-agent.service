@@ -1,0 +1,13 @@
+[Unit]
+Description=GPU C/R restore agent (auto-triggers GPU restore for restored pods)
+After=crio.service
+Wants=crio.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/lib/gpu-cr-restore/restore-agent/gpu-cr-restore-agentd
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

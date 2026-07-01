@@ -33,7 +33,14 @@ if _, err := os.Stat(req.GetConfig().GetImage().GetImage()); err == nil {
 따라서 우리가 할 일은 단 하나: **복원 직전에 `checkpoint-uri`의 tar를 노드로 staging하고
 image를 그 로컬 경로로 바꿔** 위 감지가 성립하게 만드는 것.
 
-## 복원 컨테이너로 annotation 전파 (hook 자동 발화)
+## 복원 컨테이너로 annotation 전파 (restore-agent 자동화)
+
+> 실측 결과 **crun은 CRIU restore 경로에서 poststart hook을 실행하지 않는다**(정상 `start`에만
+> 붙음). 그래서 OCI hook 대신 **host 데몬 `gpu-cr-restore-agent.service`(`restore-agent/`)**
+> 가 자동 트리거를 담당한다: crun을 폴링해 `gpu-cr.io/restore=true`(0004로 config.json에 실림)
+> + CUDA 상태 `checkpointed`인 컨테이너를 찾아 `gpu-restore.sh`(restore→gate→unlock→remap)를
+> 실행한다. k8s API 불필요. OCI hook은 fallback으로 남겨둔다.
+
 
 CRI-O 복원(`CRImportCheckpoint`)은 컨테이너 annotation을 **체크포인트 이미지에서 다시
 만든다**(원본 annotation). 그래서 복원 Pod에 붙인 `gpu-cr.io/*`가 복원 컨테이너의 OCI

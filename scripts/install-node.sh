@@ -21,8 +21,17 @@ cp -f "${REPO_DIR}/config/crio/99-gpu-cr-restore.conf" /etc/crio/crio.conf.d/
 
 mkdir -p /var/lib/gpu-cr/restore /var/lib/gpu-cr/run /var/lib/gpu-cr/cuda-req /var/lib/gcr-checkpoint
 
+echo "[node] installing restore-agent (auto-triggers GPU restore; crun skips poststart hooks on restore)"
+mkdir -p "${DEST}/restore-agent"
+cp -f "${REPO_DIR}/restore-agent/gpu-cr-restore-agentd" "${DEST}/restore-agent/"
+chmod +x "${DEST}/restore-agent/gpu-cr-restore-agentd"
+cp -f "${REPO_DIR}/restore-agent/gpu-cr-restore-agent.service" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now gpu-cr-restore-agent.service
+systemctl is-active gpu-cr-restore-agent.service && echo "[node] restore-agent active"
+
 echo "[node] validating + restarting crio"
 crio config >/dev/null 2>&1 || echo "[node] WARN: 'crio config' non-zero; check the drop-in"
 systemctl restart crio
 sleep 2 && systemctl is-active crio && echo "[node] crio active"
-echo "[node] ensure gpu-cr-cuda-helper.service (checkpoint repo) runs here for step 5"
+echo "[node] restore now auto-triggers via gpu-cr-restore-agent.service (no manual gcr_gpu_restore)"
