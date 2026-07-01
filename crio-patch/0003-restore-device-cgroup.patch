@@ -1,0 +1,26 @@
+diff --git a/server/container_restore.go b/server/container_restore.go
+index ade606e..0e062a6 100644
+--- a/server/container_restore.go
++++ b/server/container_restore.go
+@@ -253,6 +253,21 @@ func (s *Server) CRImportCheckpoint(
+ 		}
+ 	}
+ 
++	// gpu-cr: re-add the checkpoint's devices (e.g. /dev/nvidia*) to the container
++	// config so CRI-O restores the device cgroup allow-rules. Without this, crun
++	// restore leaves the device cgroup at deny-all and the GPU is inaccessible
++	// (open EPERM / cuInit CUDA_ERROR_NO_DEVICE) even for a privileged container.
++	if dumpSpec.Linux != nil {
++		for i := range dumpSpec.Linux.Devices {
++			d := dumpSpec.Linux.Devices[i]
++			containerConfig.Devices = append(containerConfig.Devices, &types.Device{
++				ContainerPath: d.Path,
++				HostPath:      d.Path,
++				Permissions:   "rwm",
++			})
++		}
++	}
++
+ 	if dumpSpec.Linux != nil {
+ 		if dumpSpec.Linux.MaskedPaths != nil {
+ 			containerConfig.Linux.SecurityContext.MaskedPaths = dumpSpec.Linux.MaskedPaths
