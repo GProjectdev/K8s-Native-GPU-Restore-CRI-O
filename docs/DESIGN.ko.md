@@ -107,6 +107,12 @@ bind mount로 주입한 상태로 체크포인트된다. CRI-O 복원 검증(`se
 `scripts/gen-nvidia-restore-mounts.sh`가 그 에러 목록을 volumeMounts+volumes YAML로
 변환해 준다(드라이버 버전에 종속적이므로 버전 바뀌면 재생성). 예: `deploy/sample-restore-pod-l1-nvidia.yaml`.
 
+또한 일부 NVIDIA 설정 파일(vulkan/EGL/X11 json 등)은 **host source 경로가 destination과
+달라서**(또는 nvidia-container-toolkit이 다른 위치에서 mount) 같은-경로 hostPath로는
+런타임에 "bind mount source ... is missing"으로 실패한다. `scripts/gen-restore-pod.sh`는
+**체크포인트 tar의 `spec.dump`에서 각 mount의 실제 source→destination을 읽어** 정확한
+매니페스트를 생성한다(host에 없는 source는 경고 후 제외). 이쪽이 권장 경로다.
+
 ## 가능성 판단 / 미검증 지점 (정직하게)
 
 1. **컴파일 미검증**: 이 환경엔 Go 툴체인이 없어 `gpu_cr_restore.go`와 patch는 **빌드/실측
