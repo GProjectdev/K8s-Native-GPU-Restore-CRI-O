@@ -33,6 +33,15 @@ if _, err := os.Stat(req.GetConfig().GetImage().GetImage()); err == nil {
 따라서 우리가 할 일은 단 하나: **복원 직전에 `checkpoint-uri`의 tar를 노드로 staging하고
 image를 그 로컬 경로로 바꿔** 위 감지가 성립하게 만드는 것.
 
+## annotation은 "샌드박스"에 담긴다 (중요)
+
+kubelet은 Pod의 임의 annotation(`gpu-cr.io/*`)을 **컨테이너가 아니라 Pod 샌드박스**
+(`PodSandboxConfig.Annotations`)로 전달한다. 따라서 패치는 `CreateContainer`에서
+`req.GetSandboxConfig().GetAnnotations()`를 읽어야 하며, 컨테이너 config annotation만
+읽으면 키가 비어 조용히 no-op가 되어 복원이 안 걸린다(증상: `/var/lib/gpu-cr/restore/`가
+비고 `Completed`). 또한 poststart hook이 매칭하도록 `gpu-cr.io/*`를 컨테이너 config
+annotation으로 **전파**한다(안 되면 런타임에 `allowed_annotations` 추가 필요).
+
 ## 패치 (crio-patch/)
 
 - **`server/gpu_cr_restore.go`** (새 파일): `stageGPUCheckpoint(ctx, cfg)` —

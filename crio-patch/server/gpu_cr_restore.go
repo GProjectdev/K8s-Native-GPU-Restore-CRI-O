@@ -51,6 +51,7 @@ import (
 const (
 	gpuCRRestoreAnnotation = "gpu-cr.io/restore"
 	gpuCRURIAnnotation     = "gpu-cr.io/checkpoint-uri"
+	gpuCRSrcUIDAnnotation  = "gpu-cr.io/source-pod-uid"
 	gpuCRStageDir          = "/var/lib/gpu-cr/restore"
 )
 
@@ -59,20 +60,19 @@ const (
 // It is a no-op unless the container carries gpu-cr.io/restore=true. When the
 // annotation is set but no URI is given, the existing image is assumed to be a
 // valid local archive or checkpoint OCI image and is left untouched.
-func (s *Server) stageGPUCheckpoint(ctx context.Context, cfg *types.ContainerConfig) error {
+func (s *Server) stageGPUCheckpoint(ctx context.Context, sbAnnotations map[string]string, cfg *types.ContainerConfig) error {
 	if cfg == nil {
 		return nil
 	}
 
-	ann := cfg.GetAnnotations()
+	// Pod annotations arrive on the SANDBOX config (kubelet puts arbitrary Pod
+	// annotations there), not on the container config. Read the sandbox first and
+	// fall back to container annotations for non-kubelet callers (crictl/podman).
+	ann := sbAnnotations
 	if ann[gpuCRRestoreAnnotation] != "true" {
-		return nil
+		ann = cfg.GetAnnotations()
 	}
-
-	uri := strings.TrimSpace(ann[gpuCRURIAnnotation])
-	if uri == "" {
-		log.Infof(ctx, "gpu-cr: restore requested without %s; using image %q as-is",
-			gpuCRURIAnnotation, cfg.GetImage().GetImage())
+	if ann[gpuCRRestoreAnnotation] != "true" {
 		return nil
 	}
 
@@ -80,14 +80,31 @@ func (s *Server) stageGPUCheckpoint(ctx context.Context, cfg *types.ContainerCon
 	if name == "" {
 		name = "ckpt"
 	}
+	log.Infof(ctx, "gpu-cr: restore annotation detected for container %q", name)
 
-	dst := filepath.Join(gpuCRStageDir, fmt.Sprintf("%s-Checkpoint.tar", name))
-	if err := stageCheckpointURI(ctx, uri, dst); err != nil {
-		return fmt.Errorf("stage checkpoint %q: %w", uri, err)
+	uri := strings.TrimSpace(ann[gpuCRURIAnnotation])
+	if uri != "" {
+		dst := filepath.Join(gpuCRStageDir, fmt.Sprintf("%s-Checkpoint.tar", name))
+		if err := stageCheckpointURI(ctx, uri, dst); err != nil {
+			return fmt.Errorf("stage checkpoint %q: %w", uri, err)
+		}
+		log.Infof(ctx, "gpu-cr: staged checkpoint %q -> %s; restoring from local archive", uri, dst)
+		cfg.Image = &types.ImageSpec{Image: dst}
+	} else {
+		log.Infof(ctx, "gpu-cr: restore without %s; using image %q as-is",
+			gpuCRURIAnnotation, cfg.GetImage().GetImage())
 	}
 
-	log.Infof(ctx, "gpu-cr: staged checkpoint %q -> %s; restoring from local archive", uri, dst)
-	cfg.Image = &types.ImageSpec{Image: dst}
+	// Propagate the gpu-cr annotations onto the CONTAINER config so they land in
+	// the container's OCI spec, where the gpu-cr-restore poststart hook matches.
+	if cfg.Annotations == nil {
+		cfg.Annotations = map[string]string{}
+	}
+	for _, k := range []string{gpuCRRestoreAnnotation, gpuCRURIAnnotation, gpuCRSrcUIDAnnotation} {
+		if v := ann[k]; v != "" {
+			cfg.Annotations[k] = v
+		}
+	}
 	return nil
 }
 
