@@ -13,6 +13,17 @@ The checkpoint system is verified on K8s/CRI-O v1.33, so build with
 `CRIO_VERSION=v1.33.x` (not the patch's v1.35.0 default).
 
 ## B. Existing CRI-O node (typical)
+
+Prerequisite (build host): Go matching cri-o's go.mod (>=1.24.3 for cri-o 1.33),
+plus make/gcc/pkg-config and cri-o deps. `go: command not found` / `make Error 127`
+means Go is missing:
+```bash
+GO_VER=go1.24.6
+curl -sSfL "https://go.dev/dl/${GO_VER}.linux-amd64.tar.gz" | sudo tar -xz -C /usr/local
+export PATH=$PATH:/usr/local/go/bin
+sudo apt-get install -y make gcc pkg-config libseccomp-dev libgpgme-dev libbtrfs-dev libassuan-dev
+```
+build-crio.sh preflights this and stops with guidance if anything is missing.
 ```bash
 # 1) build patched crio for YOUR version
 CRIO_VERSION=v1.33.4 ./hack/build-crio.sh         # -> /tmp/cri-o-gpu-cr/bin/crio
