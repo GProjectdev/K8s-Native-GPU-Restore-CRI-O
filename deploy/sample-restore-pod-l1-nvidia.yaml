@@ -1,0 +1,126 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: restore-cuda-l1
+  namespace: default
+  annotations:
+    gpu-cr.io/restore: "true"
+    gpu-cr.io/checkpoint-uri: "hostpath:///var/lib/gcr-checkpoint/checkpoint-cuda-l1-pod_default-cuda-app-1782869971.tar"
+    gpu-cr.io/source-pod-uid: "ebf378d3-bc87-4e45-a05e-ac4b1f3c83d1"
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: jsj-worker-1
+  restartPolicy: Never
+  containers:
+    - name: cuda-app
+      image: pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+      imagePullPolicy: IfNotPresent
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
+      volumeMounts:
+        - { name: gpu-cr-lib, mountPath: /opt/gpu-cr, readOnly: true }
+        - { name: gpu-cr-run, mountPath: /var/lib/gpu-cr/run }
+        - { name: gcr-checkpoint, mountPath: /var/lib/gcr-checkpoint }
+        # --- NVIDIA driver bind mounts the checkpoint expects (auto-generated) ---
+        - { name: nv0, mountPath: /run/nvidia-persistenced/socket, readOnly: true }
+        - { name: nv1, mountPath: /usr/bin/nvidia-cuda-mps-control, readOnly: true }
+        - { name: nv2, mountPath: /usr/bin/nvidia-cuda-mps-server, readOnly: true }
+        - { name: nv3, mountPath: /usr/bin/nvidia-debugdump, readOnly: true }
+        - { name: nv4, mountPath: /usr/bin/nvidia-persistenced, readOnly: true }
+        - { name: nv5, mountPath: /usr/bin/nvidia-smi, readOnly: true }
+        - { name: nv6, mountPath: /etc/vulkan/icd.d/nvidia_icd.json, readOnly: true }
+        - { name: nv7, mountPath: /etc/vulkan/implicit_layer.d/nvidia_layers.json, readOnly: true }
+        - { name: nv8, mountPath: /usr/lib/x86_64-linux-gnu/libEGL_nvidia.so.570.211.01, readOnly: true }
+        - { name: nv9, mountPath: /usr/lib/x86_64-linux-gnu/libGLESv1_CM_nvidia.so.570.211.01, readOnly: true }
+        - { name: nv10, mountPath: /usr/lib/x86_64-linux-gnu/libGLESv2_nvidia.so.570.211.01, readOnly: true }
+        - { name: nv11, mountPath: /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so.570.211.01, readOnly: true }
+        - { name: nv12, mountPath: /usr/lib/x86_64-linux-gnu/libcuda.so.570.211.01, readOnly: true }
+        - { name: nv13, mountPath: /usr/lib/x86_64-linux-gnu/libcudadebugger.so.570.211.01, readOnly: true }
+        - { name: nv14, mountPath: /usr/lib/x86_64-linux-gnu/libnvcuvid.so.570.211.01, readOnly: true }
+        - { name: nv15, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-allocator.so.570.211.01, readOnly: true }
+        - { name: nv16, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-cfg.so.570.211.01, readOnly: true }
+        - { name: nv17, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-egl-gbm.so.1.1.2, readOnly: true }
+        - { name: nv18, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-egl-wayland.so.1.1.20, readOnly: true }
+        - { name: nv19, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-eglcore.so.570.211.01, readOnly: true }
+        - { name: nv20, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-encode.so.570.211.01, readOnly: true }
+        - { name: nv21, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-fbc.so.570.211.01, readOnly: true }
+        - { name: nv22, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-glcore.so.570.211.01, readOnly: true }
+        - { name: nv23, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-glsi.so.570.211.01, readOnly: true }
+        - { name: nv24, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-glvkspirv.so.570.211.01, readOnly: true }
+        - { name: nv25, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-gpucomp.so.570.211.01, readOnly: true }
+        - { name: nv26, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.570.211.01, readOnly: true }
+        - { name: nv27, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-ngx.so.570.211.01, readOnly: true }
+        - { name: nv28, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-nvvm.so.570.211.01, readOnly: true }
+        - { name: nv29, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-opencl.so.570.211.01, readOnly: true }
+        - { name: nv30, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-opticalflow.so.570.211.01, readOnly: true }
+        - { name: nv31, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-pkcs11-openssl3.so.570.211.01, readOnly: true }
+        - { name: nv32, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.570.211.01, readOnly: true }
+        - { name: nv33, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-rtcore.so.570.211.01, readOnly: true }
+        - { name: nv34, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-sandboxutils.so.570.211.01, readOnly: true }
+        - { name: nv35, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-tls.so.570.211.01, readOnly: true }
+        - { name: nv36, mountPath: /usr/lib/x86_64-linux-gnu/libnvidia-vksc-core.so.570.211.01, readOnly: true }
+        - { name: nv37, mountPath: /usr/lib/x86_64-linux-gnu/libnvoptix.so.570.211.01, readOnly: true }
+        - { name: nv38, mountPath: /usr/share/nvidia/nvoptix.bin, readOnly: true }
+        - { name: nv39, mountPath: /lib/firmware/nvidia/570.211.01/gsp_ga10x.bin, readOnly: true }
+        - { name: nv40, mountPath: /lib/firmware/nvidia/570.211.01/gsp_tu10x.bin, readOnly: true }
+        - { name: nv41, mountPath: /usr/lib/x86_64-linux-gnu/vdpau/libvdpau_nvidia.so.570.211.01, readOnly: true }
+        - { name: nv42, mountPath: /usr/share/X11/xorg.conf.d/10-nvidia.conf, readOnly: true }
+        - { name: nv43, mountPath: /usr/share/egl/egl_external_platform.d/10_nvidia_wayland.json, readOnly: true }
+        - { name: nv44, mountPath: /usr/share/egl/egl_external_platform.d/15_nvidia_gbm.json, readOnly: true }
+        - { name: nv45, mountPath: /usr/share/glvnd/egl_vendor.d/10_nvidia.json, readOnly: true }
+        - { name: nv46, mountPath: /usr/lib/x86_64-linux-gnu/nvidia/xorg/libglxserver_nvidia.so.570.211.01, readOnly: true }
+        - { name: nv47, mountPath: /usr/lib/x86_64-linux-gnu/nvidia/xorg/nvidia_drv.so, readOnly: true }
+  volumes:
+    - { name: gpu-cr-lib, hostPath: { path: /var/lib/gpu-cr/lib, type: Directory } }
+    - { name: gpu-cr-run, hostPath: { path: /var/lib/gpu-cr/run, type: DirectoryOrCreate } }
+    - { name: gcr-checkpoint, hostPath: { path: /var/lib/gcr-checkpoint, type: DirectoryOrCreate } }
+    # --- NVIDIA driver bind mounts (auto-generated) ---
+    - { name: nv0, hostPath: { path: /run/nvidia-persistenced/socket } }
+    - { name: nv1, hostPath: { path: /usr/bin/nvidia-cuda-mps-control } }
+    - { name: nv2, hostPath: { path: /usr/bin/nvidia-cuda-mps-server } }
+    - { name: nv3, hostPath: { path: /usr/bin/nvidia-debugdump } }
+    - { name: nv4, hostPath: { path: /usr/bin/nvidia-persistenced } }
+    - { name: nv5, hostPath: { path: /usr/bin/nvidia-smi } }
+    - { name: nv6, hostPath: { path: /etc/vulkan/icd.d/nvidia_icd.json } }
+    - { name: nv7, hostPath: { path: /etc/vulkan/implicit_layer.d/nvidia_layers.json } }
+    - { name: nv8, hostPath: { path: /usr/lib/x86_64-linux-gnu/libEGL_nvidia.so.570.211.01 } }
+    - { name: nv9, hostPath: { path: /usr/lib/x86_64-linux-gnu/libGLESv1_CM_nvidia.so.570.211.01 } }
+    - { name: nv10, hostPath: { path: /usr/lib/x86_64-linux-gnu/libGLESv2_nvidia.so.570.211.01 } }
+    - { name: nv11, hostPath: { path: /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so.570.211.01 } }
+    - { name: nv12, hostPath: { path: /usr/lib/x86_64-linux-gnu/libcuda.so.570.211.01 } }
+    - { name: nv13, hostPath: { path: /usr/lib/x86_64-linux-gnu/libcudadebugger.so.570.211.01 } }
+    - { name: nv14, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvcuvid.so.570.211.01 } }
+    - { name: nv15, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-allocator.so.570.211.01 } }
+    - { name: nv16, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-cfg.so.570.211.01 } }
+    - { name: nv17, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-egl-gbm.so.1.1.2 } }
+    - { name: nv18, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-egl-wayland.so.1.1.20 } }
+    - { name: nv19, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-eglcore.so.570.211.01 } }
+    - { name: nv20, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-encode.so.570.211.01 } }
+    - { name: nv21, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-fbc.so.570.211.01 } }
+    - { name: nv22, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-glcore.so.570.211.01 } }
+    - { name: nv23, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-glsi.so.570.211.01 } }
+    - { name: nv24, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-glvkspirv.so.570.211.01 } }
+    - { name: nv25, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-gpucomp.so.570.211.01 } }
+    - { name: nv26, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.570.211.01 } }
+    - { name: nv27, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-ngx.so.570.211.01 } }
+    - { name: nv28, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-nvvm.so.570.211.01 } }
+    - { name: nv29, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-opencl.so.570.211.01 } }
+    - { name: nv30, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-opticalflow.so.570.211.01 } }
+    - { name: nv31, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-pkcs11-openssl3.so.570.211.01 } }
+    - { name: nv32, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.570.211.01 } }
+    - { name: nv33, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-rtcore.so.570.211.01 } }
+    - { name: nv34, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-sandboxutils.so.570.211.01 } }
+    - { name: nv35, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-tls.so.570.211.01 } }
+    - { name: nv36, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvidia-vksc-core.so.570.211.01 } }
+    - { name: nv37, hostPath: { path: /usr/lib/x86_64-linux-gnu/libnvoptix.so.570.211.01 } }
+    - { name: nv38, hostPath: { path: /usr/share/nvidia/nvoptix.bin } }
+    - { name: nv39, hostPath: { path: /lib/firmware/nvidia/570.211.01/gsp_ga10x.bin } }
+    - { name: nv40, hostPath: { path: /lib/firmware/nvidia/570.211.01/gsp_tu10x.bin } }
+    - { name: nv41, hostPath: { path: /usr/lib/x86_64-linux-gnu/vdpau/libvdpau_nvidia.so.570.211.01 } }
+    - { name: nv42, hostPath: { path: /usr/share/X11/xorg.conf.d/10-nvidia.conf } }
+    - { name: nv43, hostPath: { path: /usr/share/egl/egl_external_platform.d/10_nvidia_wayland.json } }
+    - { name: nv44, hostPath: { path: /usr/share/egl/egl_external_platform.d/15_nvidia_gbm.json } }
+    - { name: nv45, hostPath: { path: /usr/share/glvnd/egl_vendor.d/10_nvidia.json } }
+    - { name: nv46, hostPath: { path: /usr/lib/x86_64-linux-gnu/nvidia/xorg/libglxserver_nvidia.so.570.211.01 } }
+    - { name: nv47, hostPath: { path: /usr/lib/x86_64-linux-gnu/nvidia/xorg/nvidia_drv.so } }
