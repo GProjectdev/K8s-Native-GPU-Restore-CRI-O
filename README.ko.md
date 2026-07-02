@@ -7,7 +7,7 @@
 [`leehun-cri-o`](https://github.com/lehuannhatrang/leehun-cri-o)와 같은 방향) + GPU 단계용
 OCI hook.
 
-> 사용법: [docs/USAGE.ko.md](docs/USAGE.ko.md) · 설계/비교: [docs/DESIGN.ko.md](docs/DESIGN.ko.md) · 실험: [docs/SETUP.ko.md](docs/SETUP.ko.md)
+> 사용법: [docs/USAGE.ko.md](docs/USAGE.ko.md) · 노드간: [docs/MIGRATION.ko.md](docs/MIGRATION.ko.md) · 설계/비교: [docs/DESIGN.ko.md](docs/DESIGN.ko.md) · 실험: [docs/SETUP.ko.md](docs/SETUP.ko.md)
 
 ## 왜 shim이 아니라 CRI-O 포크인가
 
@@ -55,6 +55,9 @@ kubectl apply -f deploy/sample-restore-pod-l1.yaml   # placeholder 채운 뒤
 
 ## 상태
 
-실험용, 단일 컨테이너·단일 GPU. patch는 cri-o v1.35.0에 clean apply되지만 **빌드/실측은
-미검증**(작성 환경에 Go 툴체인 없음). 정직한 미검증 지점은
-[docs/DESIGN.ko.md](docs/DESIGN.ko.md).
+실험용, 단일 컨테이너·단일 GPU. **cri-o v1.33.13(K8s v1.33, NVIDIA 570.211.01, A100)에서
+end-to-end 검증 완료:** 같은 노드 복원과 노드 간 마이그레이션(worker-1 → worker-2, HTTP로
+체크포인트 pull) 모두 워크로드가 재개되고 GPU 체크섬이 비트 단위로 일치하며, restore-agent로
+`kubectl apply`만으로 완전 자동 동작. 패치(0001–0004)는 cri-o v1.35.0·v1.33.13에 clean apply.
+전제·남은 지점은 [docs/DESIGN.ko.md](docs/DESIGN.ko.md), 노드 간 절차는
+[docs/MIGRATION.ko.md](docs/MIGRATION.ko.md).

@@ -6,8 +6,10 @@ NVIDIA 드라이버 570+.
 ## 0. 전제
 - 체크포인트 시스템 설치 + `Checkpoint.tar` 생성 완료.
 - 각 GPU 워커: 드라이버 570+, CRIU, `cuda-checkpoint`, `gpu-cr-cuda-helper.service`(host
-  helper, `restore <pid>` 처리), 인터셉터 lib(`/var/lib/gpu-cr/lib/libgcr-interceptor.so`),
-  NVIDIA device plugin.
+  helper), 인터셉터 lib(`/var/lib/gpu-cr/lib/libgcr-interceptor.so`), NVIDIA device plugin,
+  patch crio + `scripts/install-node.sh`(restore-agent 포함).
+- **노드 간 복원 시: source·target 노드의 NVIDIA 드라이버 버전이 동일해야 함**
+  (예: 570.211.01). cuda-checkpoint 복원의 근본 제약이자 드라이버 라이브러리 경로 일치 조건.
 
 ## 1. Custom CRI-O 빌드 (빌드 호스트, 1회)
 ```bash
@@ -32,8 +34,9 @@ ls /usr/local/lib/gpu-cr-restore/oci-hooks/gpu-cr-restore.json
 ```
 
 ## 3. 체크포인트 준비
-같은 노드면 tar가 이미 `/var/lib/gcr-checkpoint`에 있다. 다른 노드면 `checkpoint-uri`로
-`nfs://`/`https://`를 쓰거나 미리 옮긴다. 원본 Pod UID:
+같은 노드면 tar가 이미 `/var/lib/gcr-checkpoint`에 있다. **다른 노드로 복원(마이그레이션)이면
+`checkpoint-uri`를 `http(s)://`/`nfs://`로 지정** — 자세한 절차는 [MIGRATION.ko.md](MIGRATION.ko.md).
+원본 Pod UID:
 ```bash
 kubectl get pod <원본-pod> -o jsonpath='{.metadata.uid}'
 ```

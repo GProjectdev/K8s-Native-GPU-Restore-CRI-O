@@ -74,6 +74,11 @@ Full steps: [docs/SETUP.ko.md](docs/SETUP.ko.md).
 
 ## Status
 
-Experimental, single-container / single-GPU. The patch applies cleanly to cri-o
-v1.35.0; it is **not yet build/runtime-verified** (no Go toolchain in the authoring
-env). Honest unverified points are in [docs/DESIGN.ko.md](docs/DESIGN.ko.md).
+Experimental, single-container / single-GPU. **Verified end-to-end on cri-o
+v1.33.13 (K8s v1.33, NVIDIA driver 570.211.01, A100):** same-node restore and
+cross-node migration (worker-1 → worker-2, checkpoint pulled over HTTP) both
+resume the workload with a bit-exact GPU checksum, fully automatic via the
+restore-agent (just `kubectl apply`). The patch set (0001–0004) applies cleanly to
+cri-o v1.35.0 and v1.33.13. Assumptions and remaining points are in
+[docs/DESIGN.ko.md](docs/DESIGN.ko.md); cross-node steps in
+[docs/MIGRATION.ko.md](docs/MIGRATION.ko.md).
