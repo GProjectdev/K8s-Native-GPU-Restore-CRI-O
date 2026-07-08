@@ -5,11 +5,13 @@ NVIDIA 드라이버 570+.
 
 ## 0. 전제
 - 체크포인트 시스템 설치 + `Checkpoint.tar` 생성 완료.
-- 각 GPU 워커: 드라이버 570+, CRIU, `cuda-checkpoint`, `gpu-cr-cuda-helper.service`(host
-  helper), 인터셉터 lib(`/var/lib/gpu-cr/lib/libgcr-interceptor.so`), NVIDIA device plugin,
+- 각 GPU 워커: 드라이버 570+, **CRIUgpu**(CRIU + NVIDIA `cuda_plugin` **활성화**),
+  인터셉터 lib(`/var/lib/gpu-cr/lib/libgcr-interceptor.so`), NVIDIA device plugin,
   patch crio + `scripts/install-node.sh`(restore-agent 포함).
+  - cuda_plugin이 GPU 제어상태를 CRIU 복원 중에 복원하므로 호스트 `cuda-checkpoint` 헬퍼는
+    이 경로에서 불필요하다(체크포인트 저장소의 `gpu-worker-setup.sh`가 cuda_plugin을 켠다).
 - **노드 간 복원 시: source·target 노드의 NVIDIA 드라이버 버전이 동일해야 함**
-  (예: 570.211.01). cuda-checkpoint 복원의 근본 제약이자 드라이버 라이브러리 경로 일치 조건.
+  (예: 570.211.01). CRIUgpu(cuda_plugin) 복원의 근본 제약이자 드라이버 라이브러리 경로 일치 조건.
 
 ## 1. Custom CRI-O 빌드 (빌드 호스트, 1회)
 ```bash
@@ -55,8 +57,9 @@ kubectl get pod restore-cuda-l1 -o wide
 sudo journalctl -u crio | grep -E 'gpu-cr|Assuming it is a checkpoint' | tail -40
 kubectl logs restore-cuda-l1 | tail -5     # checksum ... OK
 ```
-기대: crio 로그에 `gpu-cr: staged checkpoint`, 네이티브 복원, hook 로그에
-`host helper restore ok` / `interceptor remap ack`, 워크로드 체크섬 `OK`.
+기대: crio 로그에 `gpu-cr: staged checkpoint`, 네이티브 CRIU 복원(cuda_plugin이 제어상태
+복원), restore-agent 로그에 `remapping GPU data ...` / `container ... restored`,
+워크로드 체크섬 `OK`.
 
 ## 6. 트러블슈팅
 | 증상 | 조치 |
@@ -64,8 +67,8 @@ kubectl logs restore-cuda-l1 | tail -5     # checksum ... OK
 | 일반 이미지로 pull 시도 | image가 staging 후 로컬 파일로 바뀌는지(crio 로그 `gpu-cr: staged`), `enable_criu_support` 확인 |
 | `stage checkpoint ... no such file` | `checkpoint-uri` 경로/스킴 확인, target 노드 staging |
 | hook 미동작 | `hooks_dir`에 oci-hooks 등록됐는지, `gpu-cr.io/restore=true` annotation, hook 실행권한 |
-| `host helper timeout` | `gpu-cr-cuda-helper.service`가 `restore` 처리하는지 |
-| remap ack 없음 | `source-pod-uid` 일치, control 디렉터리 마운트 |
+| 복원 직후 `CUDA_ERROR_INVALID_ARGUMENT`/크래시 | 인터셉터 gate-at-freeze(체크포인트 저장소) 적용 여부, cuda_plugin 활성화 확인 |
+| remap ack 없음 | restore-agent 실행 여부, `source-pod-uid` 일치, control 디렉터리 마운트 |
 
 ## 대안: 포크 없는 shim
 CRI-O를 빌드하기 어렵다면 `alt-shim/`의 런타임 핸들러 방식을 쓸 수 있다(견고성은 낮음).

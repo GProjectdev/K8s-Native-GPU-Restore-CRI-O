@@ -126,8 +126,8 @@ kubectl get pod restore-cuda-l1 -w
 
 ```bash
 sudo journalctl -u crio | grep -E 'gpu-cr|checkpoint archive' | tail
-# 기대: "gpu-cr: staged checkpoint ..." -> 네이티브 복원 -> hook: "host helper restore ok",
-#       "interceptor remap ack"
+# 기대: "gpu-cr: staged checkpoint ..." -> 네이티브 복원(cuda_plugin이 제어상태 복원) ->
+#       restore-agent: "remapping GPU data ...", "container ... restored"
 kubectl logs restore-cuda-l1 | tail -5         # checksum ... OK
 ```
 

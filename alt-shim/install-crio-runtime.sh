@@ -35,4 +35,4 @@ systemctl is-active crio && echo "[install] crio active"
 
 echo "[install] done. Next:"
 echo "  kubectl apply -f ${REPO_DIR}/config/runtimeclass.yaml   # once per cluster"
-echo "  ensure gpu-cr-cuda-helper.service (from the checkpoint repo) runs on this node"
+echo "  ensure CRIUgpu (CRIU + cuda_plugin) is enabled on this node — see the checkpoint repo's gpu-worker-setup.sh"

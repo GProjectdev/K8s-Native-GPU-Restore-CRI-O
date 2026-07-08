@@ -26,8 +26,9 @@ nodeSelector), then `kubectl apply -f` it.
 sudo journalctl -u crio | grep gpu-cr | tail
 kubectl logs restore-cuda-l1 | tail -5   # checksum ... OK
 ```
-Expect: `gpu-cr: staged checkpoint`, native CRIU restore, then the poststart hook
-`host helper restore ok` + `interceptor remap ack`, and a matching checksum.
+Expect: `gpu-cr: staged checkpoint`, native CRIU restore (cuda_plugin restores the
+GPU control state — CRIUgpu), then the restore-agent `remapping GPU data ...` /
+`container ... restored`, and a matching checksum.
 
 A fork-free runtime-shim alternative lives in `alt-shim/` (less robust). See
 `docs/DESIGN.ko.md` for the approach comparison and honest unverified points.

@@ -13,14 +13,15 @@
 #
 #   2.5 stage  : fetch the Checkpoint.tar referenced by gpu-cr.io/checkpoint-uri
 #                onto this node and unpack it into an image-dir.
-#   4   CRIU   : `crun restore` re-creates the container + CPU process from the
-#                checkpoint (host-resident GPU control state + data buffers come
-#                back as ordinary process memory).
-#   5   GPU control : cuda-checkpoint --action restore re-installs CUDA contexts
-#                /streams onto the device (delegated to the host helper).
+#   4   CRIU + cuda_plugin : `crun restore` re-creates the container + CPU process
+#                AND the GPU control state (CUDA contexts/streams) from the checkpoint
+#                — the NVIDIA cuda_plugin restores the device control state inline
+#                during the CRIU restore (CRIUgpu). No host cuda-checkpoint step.
 #   6   GPU data    : signal the in-Pod GCR interceptor to remap data buffers to
 #                the SAME virtual addresses and copy host->device (H2D).
-#   7   resume      : the restored process unblocks (CUDA was suspended until 5/6).
+#   7   resume      : the app's gated kernel launches unblock once 6 completes
+#                (the interceptor armed its gate at checkpoint freeze, captured by
+#                CRIU, so the restored app waits at its first launch until remap).
 #   8   register    : control returns to CRI-O/kubelet, which marks the container
 #                Running like any normal container.
 #

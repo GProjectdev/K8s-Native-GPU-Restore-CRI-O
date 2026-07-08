@@ -24,8 +24,9 @@ crio-patch/server/gpu_cr_restore.go            # stageGPUCheckpoint(): checkpoin
                                                 # 노드로 staging, image를 로컬 tar로 치환
 crio-patch/0001-create-stage-gpu-checkpoint.patch  # CreateContainer에 호출 1줄
                                                 # (cri-o v1.35.0에 clean apply 확인)
-oci-hooks/ + hooks/                             # poststart hook: GPU 제어상태 복원
-                                                # + 데이터버퍼 remap
+oci-hooks/ + hooks/                             # poststart hook + restore-agent:
+                                                # GPU 데이터버퍼 remap (제어상태는
+                                                # CRIUgpu로 복귀)
 ```
 
 ## 복원 흐름
@@ -35,10 +36,10 @@ oci-hooks/ + hooks/                             # poststart hook: GPU 제어상�
 2  스케줄러가 노드 선택      (실험: nodeSelector)
 2.5 Custom CRI-O가 checkpoint-uri의 tar를 노드로 STAGING
 3  kubelet -> CRI-O 로컬 아카이브 감지
-4  CRIU 복원               (컨테이너 + CPU 프로세스)
-5  poststart hook: GPU 제어상태  (cuda-checkpoint --restore via host helper)
-6  poststart hook: GPU 데이터버퍼 (인터셉터 동일 VA remap + H2D)
-7  workload resume
+4  CRIU 복원 + cuda_plugin   (컨테이너 + CPU 프로세스 + GPU 제어상태 — CRIUgpu)
+5  restore-agent가 복원된 컨테이너 감지 (gpu-cr.io/restore=true)
+6  데이터 remap: 인터셉터가 physical 재생성 + 동일 VA + H2D
+7  gate에 대기하던 커널 런치 unblock -> workload resume
 8  CRI-O/kubelet이 정상 Running 컨테이너로 등록
 ```
 

@@ -27,8 +27,9 @@ crio-patch/server/gpu_cr_restore.go            # stageGPUCheckpoint(): fetch the
                                                 # point the image at the local tar
 crio-patch/0001-create-stage-gpu-checkpoint.patch  # 1-line call in CreateContainer
                                                 # (applies cleanly to cri-o v1.35.0)
-oci-hooks/gpu-cr-restore.json + hooks/          # poststart hook: GPU control-state
-                                                # restore + data-buffer remap
+oci-hooks/gpu-cr-restore.json + hooks/          # poststart hook + restore-agent:
+                                                # GPU data-buffer remap (control
+                                                # state comes back via CRIUgpu)
 ```
 
 ## Restore flow
@@ -38,10 +39,10 @@ oci-hooks/gpu-cr-restore.json + hooks/          # poststart hook: GPU control-st
 2  scheduler picks node     (experiment: nodeSelector)
 2.5 Custom CRI-O STAGES the tar from gpu-cr.io/checkpoint-uri onto the node
 3  kubelet -> CRI-O detects the local archive
-4  CRIU restore             (container + CPU process)
-5  poststart hook: GPU control state  (cuda-checkpoint --restore via host helper)
-6  poststart hook: GPU data buffers   (interceptor remap to SAME VA + H2D)
-7  workload resumes
+4  CRIU restore + cuda_plugin  (container + CPU process AND GPU control state — CRIUgpu)
+5  restore-agent detects the restored container (gpu-cr.io/restore=true)
+6  data remap: interceptor recreates physical + SAME VA + H2D
+7  gated kernel launches unblock -> workload resumes
 8  CRI-O/kubelet register it as a normal Running container
 ```
 

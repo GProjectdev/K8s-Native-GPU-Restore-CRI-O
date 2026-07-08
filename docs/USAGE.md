@@ -50,7 +50,8 @@ kubectl get nodes
 ## Restore
 Fill `deploy/sample-restore-pod-l1.yaml` (source-pod-uid, checkpoint-uri, image,
 nodeSelector) and `kubectl apply -f`. Expect crio logs `gpu-cr: staged checkpoint`,
-native restore, then hook `host helper restore ok` + `interceptor remap ack`.
+native restore (cuda_plugin restores GPU control state — CRIUgpu), then restore-agent
+`remapping GPU data ...` / `container ... restored`.
 
 ## Rollback
 ```bash
