@@ -7,7 +7,8 @@ NVIDIA 드라이버 570+.
 - 체크포인트 시스템 설치 + `Checkpoint.tar` 생성 완료.
 - 각 GPU 워커: 드라이버 570+, **CRIUgpu**(CRIU + NVIDIA `cuda_plugin` **활성화**),
   인터셉터 lib(`/var/lib/gpu-cr/lib/libgcr-interceptor.so`), NVIDIA device plugin,
-  patch crio + `scripts/install-node.sh`(restore-agent 포함).
+  patch crio + `scripts/install-node.sh`(restore-agent 포함),
+  **`/var/lib/gcr-data` hostPath**(인터셉터가 GPU 데이터 `data.blob`을 읽고 쓰는 위치).
   - cuda_plugin이 GPU 제어상태를 CRIU 복원 중에 복원하므로 호스트 `cuda-checkpoint` 헬퍼는
     이 경로에서 불필요하다(체크포인트 저장소의 `gpu-worker-setup.sh`가 cuda_plugin을 켠다).
 - **노드 간 복원 시: source·target 노드의 NVIDIA 드라이버 버전이 동일해야 함**
@@ -57,9 +58,9 @@ kubectl get pod restore-cuda-l1 -o wide
 sudo journalctl -u crio | grep -E 'gpu-cr|Assuming it is a checkpoint' | tail -40
 kubectl logs restore-cuda-l1 | tail -5     # checksum ... OK
 ```
-기대: crio 로그에 `gpu-cr: staged checkpoint`, 네이티브 CRIU 복원(cuda_plugin이 제어상태
-복원), restore-agent 로그에 `remapping GPU data ...` / `container ... restored`,
-워크로드 체크섬 `OK`.
+기대: crio 로그에 `gpu-cr: staged checkpoint` + `gpu-cr: staged GPU data blob ... -> /var/lib/gcr-data/<uid>/data.blob`,
+네이티브 CRIU 복원(cuda_plugin이 제어상태 복원), restore-agent 로그에 `remapping GPU data ...` /
+`container ... restored`, 워크로드 체크섬 `OK`.
 
 ## 6. 트러블슈팅
 | 증상 | 조치 |

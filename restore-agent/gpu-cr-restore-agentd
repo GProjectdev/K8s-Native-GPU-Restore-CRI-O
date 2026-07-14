@@ -25,6 +25,7 @@ CRUN="${GCR_CRUN:-/usr/libexec/crio/crun}"
 CRUN_ROOT="${GCR_CRUN_ROOT:-/run/crun}"
 LIBDIR="${GCR_LIBDIR:-/usr/local/lib/gpu-cr-restore/hooks/lib}"
 STATE_DIR="${GCR_AGENT_STATE:-/var/lib/gpu-cr/restore-agent}"
+DATA_DIR="${GCR_DATA_DIR:-/var/lib/gcr-data}"   # where the interceptor re-reads the GPU data blob
 POLL="${GCR_AGENT_POLL:-2}"
 mkdir -p "${STATE_DIR}"
 
@@ -51,6 +52,12 @@ while true; do
     [ "${pid:-0}" -gt 0 ] 2>/dev/null || continue
 
     srcuid="$(gcr_annotation "${cfg}" 'gpu-cr.io/source-pod-uid')"
+    # The interceptor re-maps GPU data from ${GCR_DATA_DIR}/<uid>/data.blob (CRI-O
+    # stages it there at restore). Best-effort visibility if it is missing/empty.
+    blob="${DATA_DIR}/${srcuid}/data.blob"
+    if [ -n "${srcuid}" ] && [ ! -s "${blob}" ]; then
+      gcr_log "restore-agent: WARN GPU data blob missing/empty at ${blob}; remap will fail (cross-node: ensure the .blob was staged next to the tar)"
+    fi
     gcr_log "restore-agent: remapping GPU data for ${cid:0:12} (pid=${pid} uid=${srcuid}); control already restored by CRIUgpu"
     if gcr_gpu_restore "${pid}" "${srcuid}"; then
       touch "${STATE_DIR}/${cid}.done"

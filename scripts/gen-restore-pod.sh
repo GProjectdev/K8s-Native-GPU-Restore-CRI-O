@@ -52,7 +52,7 @@ env=os.environ
 skip_prefixes=("/proc","/sys","/dev","/etc/hostname","/etc/hosts","/etc/resolv.conf",
                "/etc/passwd","/etc/group","/run/secrets","/run/.containerenv",
                "/var/run/secrets",
-               "/opt/gpu-cr","/var/lib/gpu-cr","/var/lib/gcr-checkpoint")
+               "/opt/gpu-cr","/var/lib/gpu-cr","/var/lib/gcr-checkpoint","/var/lib/gcr-data")
 def skip(dst):
     return any(dst==p or dst.startswith(p+"/") or dst.startswith(p) for p in skip_prefixes)
 # NOTE: nvidia-container-cli injects its mounts with type=null (JSON) and often
@@ -99,11 +99,13 @@ spec:
         - {{ name: gpu-cr-lib, mountPath: /opt/gpu-cr, readOnly: true }}
         - {{ name: gpu-cr-run, mountPath: /var/lib/gpu-cr/run }}
         - {{ name: gcr-checkpoint, mountPath: /var/lib/gcr-checkpoint }}
+        - {{ name: gcr-data, mountPath: /var/lib/gcr-data }}
         # --- external bind mounts from the checkpoint spec.dump ({len(binds)}) ---""")
 print("\n".join(vm))
 print("""  volumes:
     - { name: gpu-cr-lib, hostPath: { path: /var/lib/gpu-cr/lib, type: Directory } }
     - { name: gpu-cr-run, hostPath: { path: /var/lib/gpu-cr/run, type: DirectoryOrCreate } }
-    - { name: gcr-checkpoint, hostPath: { path: /var/lib/gcr-checkpoint, type: DirectoryOrCreate } }""")
+    - { name: gcr-checkpoint, hostPath: { path: /var/lib/gcr-checkpoint, type: DirectoryOrCreate } }
+    - { name: gcr-data, hostPath: { path: /var/lib/gcr-data, type: DirectoryOrCreate } }""")
 print("\n".join(vol))
 PY

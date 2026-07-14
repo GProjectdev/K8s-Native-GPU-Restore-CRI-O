@@ -37,11 +37,13 @@ oci-hooks/gpu-cr-restore.json + hooks/          # poststart hook + restore-agent
 ```
 1  apply Restore Pod yaml   (image = checkpoint archive path)
 2  scheduler picks node     (experiment: nodeSelector)
-2.5 Custom CRI-O STAGES the tar from gpu-cr.io/checkpoint-uri onto the node
+2.5 Custom CRI-O STAGES two artifacts onto the node:
+      - the checkpoint .tar (CPU + GPU control state)  -> container image
+      - the sibling .blob (GPU memory data)            -> /var/lib/gcr-data/<uid>/data.blob
 3  kubelet -> CRI-O detects the local archive
 4  CRIU restore + cuda_plugin  (container + CPU process AND GPU control state — CRIUgpu)
 5  restore-agent detects the restored container (gpu-cr.io/restore=true)
-6  data remap: interceptor recreates physical + SAME VA + H2D
+6  data remap: interceptor re-opens the .blob, recreates physical + SAME VA + H2D
 7  gated kernel launches unblock -> workload resumes
 8  CRI-O/kubelet register it as a normal Running container
 ```

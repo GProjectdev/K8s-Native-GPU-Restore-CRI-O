@@ -19,7 +19,7 @@ echo "[node] installing CRI-O drop-in"
 mkdir -p /etc/crio/crio.conf.d
 cp -f "${REPO_DIR}/config/crio/99-gpu-cr-restore.conf" /etc/crio/crio.conf.d/
 
-mkdir -p /var/lib/gpu-cr/restore /var/lib/gpu-cr/run /var/lib/gpu-cr/cuda-req /var/lib/gcr-checkpoint
+mkdir -p /var/lib/gpu-cr/restore /var/lib/gpu-cr/run /var/lib/gpu-cr/cuda-req /var/lib/gcr-checkpoint /var/lib/gcr-data
 
 echo "[node] installing restore-agent (auto-triggers GPU restore; crun skips poststart hooks on restore)"
 mkdir -p "${DEST}/restore-agent"

@@ -34,11 +34,13 @@ oci-hooks/ + hooks/                             # poststart hook + restore-agent
 ```
 1  Restore Pod yaml apply  (image = 체크포인트 아카이브 경로)
 2  스케줄러가 노드 선택      (실험: nodeSelector)
-2.5 Custom CRI-O가 checkpoint-uri의 tar를 노드로 STAGING
+2.5 Custom CRI-O가 두 파일을 노드로 STAGING
+      - 체크포인트 .tar (CPU + GPU 제어상태)     -> 컨테이너 이미지
+      - 형제 .blob (GPU 메모리 데이터)           -> /var/lib/gcr-data/<uid>/data.blob
 3  kubelet -> CRI-O 로컬 아카이브 감지
 4  CRIU 복원 + cuda_plugin   (컨테이너 + CPU 프로세스 + GPU 제어상태 — CRIUgpu)
 5  restore-agent가 복원된 컨테이너 감지 (gpu-cr.io/restore=true)
-6  데이터 remap: 인터셉터가 physical 재생성 + 동일 VA + H2D
+6  데이터 remap: 인터셉터가 .blob 재오픈 후 physical 재생성 + 동일 VA + H2D
 7  gate에 대기하던 커널 런치 unblock -> workload resume
 8  CRI-O/kubelet이 정상 Running 컨테이너로 등록
 ```
