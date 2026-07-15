@@ -1,8 +1,8 @@
 diff --git a/server/container_restore.go b/server/container_restore.go
-index e214685..d723edc 100644
+index 64ac035..94bbbb8 100644
 --- a/server/container_restore.go
 +++ b/server/container_restore.go
-@@ -246,6 +246,36 @@ func (s *Server) CRImportCheckpoint(
+@@ -247,6 +247,36 @@ func (s *Server) CRImportCheckpoint(
  		Labels: createLabels,
  	}
  
@@ -36,6 +36,6 @@ index e214685..d723edc 100644
 +		containerConfig.Annotations["org.criu.config"] = criuCfg
 +	}
 +
- 	if createConfig.GetLinux() != nil {
- 		if createConfig.GetLinux().GetResources() != nil {
- 			containerConfig.Linux.Resources = createConfig.GetLinux().GetResources()
+ 	if createConfig.Linux != nil {
+ 		if createConfig.Linux.Resources != nil {
+ 			containerConfig.Linux.Resources = createConfig.Linux.Resources
