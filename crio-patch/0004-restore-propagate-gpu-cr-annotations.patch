@@ -1,8 +1,8 @@
 diff --git a/server/container_restore.go b/server/container_restore.go
-index ade606e..384c3c6 100644
+index e214685..d723edc 100644
 --- a/server/container_restore.go
 +++ b/server/container_restore.go
-@@ -243,6 +243,19 @@ func (s *Server) CRImportCheckpoint(
+@@ -246,6 +246,36 @@ func (s *Server) CRImportCheckpoint(
  		Labels: createLabels,
  	}
  
@@ -19,6 +19,23 @@ index ade606e..384c3c6 100644
 +		}
 +	}
 +
- 	if createConfig.Linux != nil {
- 		if createConfig.Linux.Resources != nil {
- 			containerConfig.Linux.Resources = createConfig.Linux.Resources
++	// gpu-cr: point crun at a CRIU RPC config file so restore honors options that
++	// CRI-O/conmon does NOT pass through to crun restore -- notably tcp-close (and
++	// ext-unix-sk) for a workload that held a socket at checkpoint. crun reads the
++	// org.criu.config annotation and loads that file; the global /etc/criu/crun.conf
++	// lookup is NOT honored on the conmon->crun path. Override per-restore with the
++	// gpu-cr.io/criu-config annotation.
++	if createConfig.GetAnnotations()["gpu-cr.io/restore"] == "true" {
++		if containerConfig.Annotations == nil {
++			containerConfig.Annotations = map[string]string{}
++		}
++		criuCfg := createConfig.GetAnnotations()["gpu-cr.io/criu-config"]
++		if criuCfg == "" {
++			criuCfg = "/etc/criu/crun.conf"
++		}
++		containerConfig.Annotations["org.criu.config"] = criuCfg
++	}
++
+ 	if createConfig.GetLinux() != nil {
+ 		if createConfig.GetLinux().GetResources() != nil {
+ 			containerConfig.Linux.Resources = createConfig.GetLinux().GetResources()

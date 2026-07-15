@@ -69,6 +69,7 @@ kubectl logs restore-cuda-l1 | tail -5     # checksum ... OK
 | `stage checkpoint ... no such file` | `checkpoint-uri` 경로/스킴 확인, target 노드 staging |
 | hook 미동작 | `hooks_dir`에 oci-hooks 등록됐는지, `gpu-cr.io/restore=true` annotation, hook 실행권한 |
 | 복원 직후 `CUDA_ERROR_INVALID_ARGUMENT`/크래시 | 인터셉터 gate-at-freeze(체크포인트 저장소) 적용 여부, cuda_plugin 활성화 확인 |
+| CRIU restore `-52` + `Need to set the --tcp-close options` | 소켓 보유 워크로드. `/etc/criu/crun.conf`에 `tcp-close`/`ext-unix-sk` 존재 확인(복원 패치가 `org.criu.config`로 crun에 전달). crun ≥ 1.9 |
 | remap ack 없음 | restore-agent 실행 여부, `source-pod-uid` 일치, control 디렉터리 마운트 |
 
 ## 대안: 포크 없는 shim

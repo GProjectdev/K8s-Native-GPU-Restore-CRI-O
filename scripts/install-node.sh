@@ -21,6 +21,19 @@ cp -f "${REPO_DIR}/config/crio/99-gpu-cr-restore.conf" /etc/crio/crio.conf.d/
 
 mkdir -p /var/lib/gpu-cr/restore /var/lib/gpu-cr/run /var/lib/gpu-cr/cuda-req /var/lib/gcr-checkpoint /var/lib/gcr-data
 
+echo "[node] installing CRIU crun config (tcp-close/ext-unix-sk for restore)"
+# CRI-O/conmon does NOT pass tcp-close/ext-unix-sk to crun restore, and crun does not
+# honor /etc/criu/default.conf overrides on that path. Our restore patch injects the
+# OCI annotation org.criu.config=/etc/criu/crun.conf; crun reads THIS file and passes
+# these options to CRIU so a checkpoint that held a socket can be restored.
+mkdir -p /etc/criu
+if [ ! -f /etc/criu/crun.conf ]; then
+  printf 'tcp-close\next-unix-sk\n' > /etc/criu/crun.conf
+else
+  grep -q '^tcp-close$'   /etc/criu/crun.conf || echo tcp-close   >> /etc/criu/crun.conf
+  grep -q '^ext-unix-sk$' /etc/criu/crun.conf || echo ext-unix-sk >> /etc/criu/crun.conf
+fi
+
 echo "[node] installing restore-agent (auto-triggers GPU restore; crun skips poststart hooks on restore)"
 mkdir -p "${DEST}/restore-agent"
 cp -f "${REPO_DIR}/restore-agent/gpu-cr-restore-agentd" "${DEST}/restore-agent/"
