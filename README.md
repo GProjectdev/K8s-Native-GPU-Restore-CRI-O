@@ -26,7 +26,7 @@ crio-patch/server/gpu_cr_restore.go            # stageGPUCheckpoint(): fetch the
                                                 # checkpoint-uri onto the node and
                                                 # point the image at the local tar
 crio-patch/0001-create-stage-gpu-checkpoint.patch  # 1-line call in CreateContainer
-                                                # (applies cleanly to cri-o v1.35.0)
+                                                # (targets cri-o v1.33.x; build default v1.33.13)
 oci-hooks/gpu-cr-restore.json + hooks/          # poststart hook + restore-agent:
                                                 # GPU data-buffer remap (control
                                                 # state comes back via CRIUgpu)
@@ -67,13 +67,25 @@ spec:
 ## Quick start
 
 ```bash
-./hack/build-crio.sh                                   # build patched cri-o v1.35.0
+./hack/build-crio.sh                                   # build patched cri-o (match node; default v1.33.13)
 sudo install -m0755 /tmp/cri-o-gpu-cr/bin/crio "$(command -v crio)"   # per node
 sudo ./scripts/install-node.sh                         # hooks + config + dirs
 kubectl apply -f deploy/sample-restore-pod-l1.yaml     # fill placeholders first
 ```
 
 Full steps: [docs/SETUP.ko.md](docs/SETUP.ko.md).
+
+### Gotchas (learned the hard way)
+
+- **Build the CRI-O version your node runs** (`crio --version` → `CRIO_VERSION=v1.33.x`).
+  The patch anchors assume the 1.33 line; other versions may need a rebase.
+- **crun >= 1.9** on every node.
+- **Socket-clean checkpoints.** A workload holding a TCP socket at checkpoint fails to
+  restore (`CRIU -52 / Need to set the --tcp-close options`) because CRI-O/crun does not
+  pass `tcp-close` on restore. Make the workload offline (e.g. load models from a local
+  path, `HF_HUB_OFFLINE=1`) and remove `tcp-close` from the source node's
+  `/etc/criu/default.conf` so the checkpoint carries no socket state. See docs/SETUP.ko.md §7.
+- **Model files:** load from a path mounted identically on source AND restore nodes.
 
 ## Status
 
@@ -82,6 +94,6 @@ v1.33.13 (K8s v1.33, NVIDIA driver 570.211.01, A100):** same-node restore and
 cross-node migration (worker-1 → worker-2, checkpoint pulled over HTTP) both
 resume the workload with a bit-exact GPU checksum, fully automatic via the
 restore-agent (just `kubectl apply`). The patch set (0001–0004) applies cleanly to
-cri-o v1.35.0 and v1.33.13. Assumptions and remaining points are in
+cri-o v1.33.x (verified end-to-end on v1.33.13; anchors assume 1.33.x). Assumptions and remaining points are in
 [docs/DESIGN.ko.md](docs/DESIGN.ko.md); cross-node steps in
 [docs/MIGRATION.ko.md](docs/MIGRATION.ko.md).

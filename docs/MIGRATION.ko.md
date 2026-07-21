@@ -14,6 +14,11 @@
 - target 노드에 **`/var/lib/gcr-data` hostPath 존재**(복원 Pod가 이 경로를 마운트하고 인터셉터가
   `data.blob`을 읽는다). CRI-O staging이 여기에 blob을 놓는다.
 - source·target이 같은 네트워크(VPC 내부)에서 통신 가능.
+- 모든 노드 **crun ≥ 1.9**.
+- **소켓 없는 깨끗한 체크포인트**여야 한다 — 워크로드가 체크포인트 시점에 TCP 소켓을 물고
+  있으면 복원이 `CRIU -52 / --tcp-close`로 실패한다(CRI-O/crun이 복원 시 tcp-close 미전달).
+  워크로드를 오프라인으로 만들고 소스 `/etc/criu/default.conf`에서 tcp-close 제거. 상세: SETUP.ko.md §7.
+- 모델을 파일로 로드한다면 source·target에 **동일 경로로 마운트**되어 있어야 한다(mmap 복원).
 
 ## 절차
 

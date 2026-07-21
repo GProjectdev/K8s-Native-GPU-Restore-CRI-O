@@ -65,7 +65,7 @@ annotation으로 **전파**한다(안 되면 런타임에 `allowed_annotations` 
   (b) 형제 **`.blob`**(GPU 데이터) → `/var/lib/gcr-data/<source-uid>/data.blob`. `.blob` URI는
   기본적으로 `.tar`→`.blob`로 유도하며 `gpu-cr.io/data-uri`로 오버라이드. 아니면 no-op.
 - **`0001-create-stage-gpu-checkpoint.patch`**: `CreateContainer` 최상단(체크포인트 감지
-  직전)에 `s.stageGPUCheckpoint(...)` 호출 1줄 삽입. cri-o **v1.35.0**에 clean apply 확인.
+  직전)에 `s.stageGPUCheckpoint(...)` 호출 1줄 삽입. cri-o **v1.33.x**에 clean apply 확인.
 
 ## GPU 복원 = CRIUgpu(제어상태) + 인터셉터 remap(데이터)
 
@@ -185,14 +185,21 @@ bind mount로 주입한 상태로 체크포인트된다. CRI-O 복원 검증(`se
 ## 가능성 판단 / 미검증 지점 (정직하게)
 
 1. **컴파일 미검증**: 이 환경엔 Go 툴체인이 없어 `gpu_cr_restore.go`와 patch는 **빌드/실측
-   미검증**이다. `hack/build-crio.sh`로 cri-o v1.35.0에 적용해 빌드해야 한다. patch의 clean
+   미검증**이다. `hack/build-crio.sh`로 노드와 동일한 cri-o(예: v1.33.13)에 적용해 빌드해야 한다. patch의 clean
    apply만 확인됨.
-2. **CRI-O 버전**: patch는 v1.35.0 기준. 다른 버전이면 `CreateContainer` 앵커를 rebase.
+2. **CRI-O 버전**: patch는 **v1.33.x 기준**(빌드 기본값 v1.33.13). container_restore.go가 `createConfig.Linux`를 쓰는 1.33 계열에 맞음 — v1.35처럼 `GetLinux()`인 버전이면 0004 앵커를 rebase해야 한다.
 3. **source-pod-uid 의존**: 데이터 remap이 원본 UID 키에 의존. 체크포인트 tar에 원본 UID를
    메타로 저장하면 annotation 없이 자동화 가능(후속).
 4. **이미지/rootfs 호환성**, **device plugin 선행**: CRIU 복원 시점에 GPU 디바이스 접근이
    준비돼 있어야 함.
 5. **단일 컨테이너/단일 GPU** 기준. 멀티프로세스(NCCL)·멀티GPU는 후속.
+6. **TCP 소켓 제약 (실측)**: CRI-O→conmon→`crun restore` 경로는 복원 시 CRIU에 `tcp-close`를
+   전달하지 못한다(`default.conf`는 RPC에 덮이고, `crun.conf`/`org.criu.config`도 이 경로에선
+   CRIU로 포워딩 안 됨). 따라서 **체크포인트 시점에 established TCP가 있으면**
+   `image.c:94: Need to set the --tcp-close options`로 복원이 실패한다. 현재 확실한 해법은
+   워크로드를 오프라인으로 만들고 소스 `default.conf`에서 tcp-close를 빼 **소켓 없는 깨끗한
+   체크포인트**를 뜨는 것(§SETUP.ko.md 7). `install-node.sh`의 `/etc/criu/crun.conf` +
+   0004의 `org.criu.config` 주입은 crun이 포워딩을 지원하는 환경을 위한 대비책이다.
 
 ## 검증 전략
 

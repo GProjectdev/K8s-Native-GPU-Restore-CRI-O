@@ -1,7 +1,7 @@
 # 실험 가이드 — GPU Restore (Custom CRI-O)
 
-`Checkpoint.tar`를 새 Pod로 복원하는 절차. 대상: K8s v1.33+, **CRI-O v1.35.0**(패치 빌드),
-NVIDIA 드라이버 570+.
+`Checkpoint.tar`를 새 Pod로 복원하는 절차. 대상: K8s v1.33+, **CRI-O v1.33.x**(노드 버전에 맞춰 패치 빌드),
+NVIDIA 드라이버 570+, **crun ≥ 1.9**.
 
 ## 0. 전제
 - 체크포인트 시스템 설치 + `Checkpoint.tar` 생성 완료.
@@ -18,7 +18,7 @@ NVIDIA 드라이버 570+.
 ```bash
 git clone https://github.com/GProjectdev/K8s-Native-GPU-Restore-CRI-O.git
 cd K8s-Native-GPU-Restore-CRI-O
-./hack/build-crio.sh          # cri-o v1.35.0 clone + 패치 + 빌드
+CRIO_VERSION=v1.33.13 ./hack/build-crio.sh   # 노드 버전에 맞춰(crio --version) clone + 패치 + 빌드
 ```
 산출물: `/tmp/cri-o-gpu-cr/bin/crio`.
 
@@ -69,8 +69,49 @@ kubectl logs restore-cuda-l1 | tail -5     # checksum ... OK
 | `stage checkpoint ... no such file` | `checkpoint-uri` 경로/스킴 확인, target 노드 staging |
 | hook 미동작 | `hooks_dir`에 oci-hooks 등록됐는지, `gpu-cr.io/restore=true` annotation, hook 실행권한 |
 | 복원 직후 `CUDA_ERROR_INVALID_ARGUMENT`/크래시 | 인터셉터 gate-at-freeze(체크포인트 저장소) 적용 여부, cuda_plugin 활성화 확인 |
-| CRIU restore `-52` + `Need to set the --tcp-close options` | 소켓 보유 워크로드. `/etc/criu/crun.conf`에 `tcp-close`/`ext-unix-sk` 존재 확인(복원 패치가 `org.criu.config`로 crun에 전달). crun ≥ 1.9 |
+| CRIU restore `-52` + `Need to set the --tcp-close options` | **체크포인트에 소켓 흔적이 남은 것.** 아래 §7 참고 — 소스에서 소켓 없는 깨끗한 체크포인트를 떠야 한다. |
 | remap ack 없음 | restore-agent 실행 여부, `source-pod-uid` 일치, control 디렉터리 마운트 |
+
+## 7. TCP 소켓 / 네트워크 워크로드 주의 (중요, 실측)
+
+CRIU는 established TCP 소켓을 특별 처리한다(덤프 시 `--tcp-close` 또는 `--tcp-established`
+필요). 문제는 **CRI-O→conmon→`crun restore` 경로가 복원 시 CRIU에 `tcp-close`를 전달하지
+못한다**는 것. `/etc/criu/default.conf`는 복원 RPC에 덮이고, `/etc/criu/crun.conf`·
+`org.criu.config`도 이 경로에선 CRIU로 포워딩되지 않았다(로그에 crun.conf 파싱 흔적 없음).
+그 결과, **소켓 흔적이 있는 체크포인트**를 복원하면 다음에서 즉사한다:
+
+```
+Error (criu/image.c:94): Need to set the --tcp-close options.   # CRIU restore -52
+```
+
+이건 GPU 이전에, 프로세스 메모리 복원 전 초기 메타데이터 게이트다(blob/cuda_plugin과 무관).
+
+**해결 — "소켓 없는 깨끗한 체크포인트"를 떠라:**
+
+1. **워크로드가 실행 중 네트워크를 안 쓰게** 한다. 예: HF 모델은 로컬 경로에서 오프라인 로드.
+   ```yaml
+   env:
+     - { name: MODEL, value: "/models/opt-1.3b" }   # repo id 아님, 마운트된 로컬 경로
+     - { name: HF_HUB_OFFLINE, value: "1" }
+     - { name: TRANSFORMERS_OFFLINE, value: "1" }
+   # 모델 폴더를 hostPath/NFS로 /models 에 마운트. 복원 노드에도 같은 경로로 마운트.
+   ```
+2. **소스 노드 `/etc/criu/default.conf`에서 `tcp-close`를 제거**한다(있으면 덤프가 이미지에
+   그 요구를 박는다).
+   ```bash
+   sudo sed -i '/^tcp-close$/d' /etc/criu/default.conf
+   ```
+3. 체크포인트 직전 **열린 TCP가 0인지 확인**(호스트에서 그 컨테이너 PID의 netns 검사):
+   ```bash
+   pid=$(for p in $(pgrep -x python); do grep -qa '<MODEL 표식>' /proc/$p/environ && echo $p; done | head -1)
+   sudo cat /proc/$pid/net/tcp /proc/$pid/net/tcp6 | awk '$1 ~ /^[0-9]+:/ && $4!="0A"'   # 빈 결과 = TCP 없음
+   ```
+4. 그 상태로 **재체크포인트** → 새 이미지엔 tcp 요구가 없어 복원이 그대로 통과한다.
+
+> 참고: `install-node.sh`는 `/etc/criu/crun.conf`(tcp-close, ext-unix-sk)를 만들고, 복원 패치는
+> `org.criu.config`로 crun에 넘기려 시도한다. 하지만 위처럼 이 CRI-O/crun 조합에선 포워딩이
+> 확인되지 않았으므로, **현재 확실한 방법은 소켓 없는 체크포인트**다. (crun/conmon이 이후
+> 버전에서 포워딩을 지원하면 config 경로도 유효해진다.)
 
 ## 대안: 포크 없는 shim
 CRI-O를 빌드하기 어렵다면 `alt-shim/`의 런타임 핸들러 방식을 쓸 수 있다(견고성은 낮음).

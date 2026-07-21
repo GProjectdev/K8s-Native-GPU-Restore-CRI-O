@@ -1,7 +1,7 @@
 # Experiment Guide — GPU Restore (Custom CRI-O)
 
 English summary of `docs/SETUP.ko.md`. Restores a `Checkpoint.tar` into a new Pod
-via a patched CRI-O (v1.35.0) native restore path. Target: K8s v1.33+, driver 570+.
+via a patched CRI-O native restore path (patch targets CRI-O v1.33.x; build the version your node runs). Target: K8s v1.33+, driver 570+, crun >= 1.9.
 
 ## 1. Build the Custom CRI-O (once)
 ```bash
