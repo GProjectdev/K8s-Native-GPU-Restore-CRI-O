@@ -1,90 +1,96 @@
-# Restore benchmark
+# Restore benchmark — gcr vs baseline
 
-`restore-bench.sh` measures **how long a GPU restore takes** on the Custom CRI-O
-path, broken into phases — the restore-side counterpart to the checkpoint repo's
-`benchmark/run.sh`.
+`restore-bench.sh` measures **GPU restore time** on the Custom CRI-O path and
+compares **OUR system (gcr)** against **baseline (pure CRIUgpu)** — the restore-side
+counterpart to the checkpoint repo's `benchmark/run.sh`.
 
-It repeatedly applies a **ready restore-Pod manifest**, waits until the Pod is
-Running, and extracts the phase breakdown from the node's logs:
-
-| Phase | What | Source |
+| Mode | Checkpoint artifact | How it restores |
 |---|---|---|
-| `stage_s` | Custom CRI-O fetches the `.tar` + `.blob` onto the node | CRI-O journal: `restore annotation detected` -> `staged GPU data blob` |
-| `criu_s` | CRIU restores CPU process **and** GPU control state (cuda_plugin) | restored container's `userdata/restore.log` (last timestamp) |
-| `cuda_plugin_s` | ...of which the NVIDIA cuda_plugin control-state restore | `cuda_plugin` lines in `restore.log` |
-| `remap_s` | interceptor re-maps GPU data from the `.blob` to the same VA (H2D) | restore-agent journal: `remapping GPU data` -> `GPU restore complete` |
-| `total_s` | wall clock from `kubectl apply` until the Pod is Running/Ready | this script |
+| **gcr** | `.tar` (CPU + GPU **control** state) + external `.blob` (GPU **data**) | CRIU restores CPU + control state; the in-Pod interceptor then re-maps the GPU data from the `.blob` to the same VA |
+| **baseline** | one `.tar` with the **whole GPU** inside | CRIU + cuda_plugin restore CPU + the entire GPU; no interceptor, no blob remap |
 
-> Timeline note: the Pod reports **Running** once CRIU restore finishes; the
-> interceptor **data remap** runs just after (driven by the restore-agent), so the app
-> is fully usable at roughly `total_s + remap_s`. Both are reported separately.
+### Phases measured (per run)
 
-## What YOU must set up first (manual steps)
+| Column | Meaning | Source |
+|---|---|---|
+| `stage_s` | Custom CRI-O fetches the archive(s) onto the node | CRI-O journal |
+| `criu_s` | CRIU restore (`restore.log` last ts). **baseline: includes ALL GPU data** | `restore.log` |
+| `cuda_plugin_s` | cuda_plugin span within `criu_s` | `restore.log` |
+| `remap_s` | interceptor `.blob` → GPU data remap (**gcr only**) | restore-agent journal |
+| `total_s` | apply → Pod Running (CRIU restore visible) | this script |
+| `usable_s` | apply → app fully usable — **gcr**: until remap done; **baseline**: `= total_s` | agent journal / this script |
 
-1. **A working restore.** Get one successful restore first (see `docs/MIGRATION.ko.md`
-   / `docs/SETUP.ko.md`). The benchmark only re-runs an existing restore; it does not
-   fix a broken one.
+The headline number is **`usable_s`** (time until the workload can actually run on the
+GPU) and the printed delta `baseline_usable − gcr_usable` (positive = gcr faster).
 
-2. **Socket-clean checkpoint.** The checkpoint must restore cleanly. A checkpoint whose
-   workload held a TCP socket fails with `CRIU -52 / --tcp-close` (SETUP.ko.md §7) — make
-   the source workload offline and re-checkpoint before benchmarking.
+## What YOU must set up first
 
-3. **A ready restore-Pod manifest** — generate once and reuse:
+1. **Two checkpoints of the SAME workload**, one per mode — produce them with the
+   *checkpoint* repo's `benchmark/run.sh` (or its agent) in each mode:
+   - **gcr**: agent `GCR_INTERCEPTION=true` → stores `<name>.tar` **and** `<name>.blob`.
+   - **baseline**: agent `GCR_INTERCEPTION=false` → stores a single `<name>.tar` (GPU data inside).
+   Use a **socket-clean, offline** workload so both restore without the `--tcp-close`
+   failure (see `docs/SETUP.ko.md` §7).
 
+2. **Two restore manifests** — generate one per checkpoint (reuse each run):
    ```bash
-   ./scripts/gen-restore-pod.sh /mnt/nfs/gcr/<checkpoint>.tar \
-     --name restore-bench --uid <source-pod-uid> --node <target-node> \
-     --image <same image as the source pod> \
-     --uri "nfs://<server>/<path>/<checkpoint>.tar" > deploy/restore-bench.yaml
+   ./scripts/gen-restore-pod.sh /mnt/nfs/gcr/<gcr-ckpt>.tar \
+     --name restore-gcr  --uid <src-uid> --node <target> --image <img> \
+     --uri "nfs://<server>/<path>/<gcr-ckpt>.tar"  > deploy/restore-gcr.yaml
+
+   ./scripts/gen-restore-pod.sh /mnt/nfs/gcr/<baseline-ckpt>.tar \
+     --name restore-base --uid <src-uid> --node <target> --image <img> \
+     --uri "nfs://<server>/<path>/<baseline-ckpt>.tar" > deploy/restore-baseline.yaml
    ```
+   > The baseline manifest still uses the gpu-cr staging annotations (to fetch the tar);
+   > it just has no `.blob`/interceptor, so the restore-agent's remap is a no-op there —
+   > harmless, and the benchmark deletes the pod right after measuring.
 
-4. **Pre-pull the restore image** on the target node so image-pull time does not skew
-   `total_s` (manifest uses `imagePullPolicy: IfNotPresent`):
+3. **Pre-pull the image** on the target node (`sudo crictl pull <img>`) so image-pull
+   time doesn't skew `total_s` (manifests use `imagePullPolicy: IfNotPresent`).
 
-   ```bash
-   sudo crictl pull <image>   # on the target node
-   ```
+4. **Free GPU** on the target node (single-GPU: nothing else may hold it).
 
-5. **Free GPU on the target node** (single-GPU nodes: nothing else may hold the GPU;
-   the source pod can stay on its own node, the restore lands on `--node`).
-
-6. **Host access for the phase split.** CRI-O/restore-agent journals, `restore.log` and
-   staged files live on the **target node**. Either:
-   - run on the **master** with `NODE_SSH="ssh <target-node>"` (key-based SSH able to
-     read `journalctl` and `/run/...`, i.e. root), or
-   - run **on the target node** (with `kubectl` working there), leaving `NODE_SSH` empty.
-   Without host access you still get `total_s`; per-phase columns stay blank.
+5. **Host access** for the phase split (CRI-O/agent journals, `restore.log`, staged
+   files live on the target node): run on the master with `NODE_SSH="ssh <target>"`
+   (root-capable SSH), or run on the node itself with `NODE_SSH=""`. Without it you
+   still get `total_s`/`usable_s`; per-phase columns stay blank.
 
 ## Run
 
 ```bash
-RESTORE_YAML=deploy/restore-bench.yaml \
+GCR_YAML=deploy/restore-gcr.yaml \
+BASE_YAML=deploy/restore-baseline.yaml \
 NODE_SSH="ssh jsj-worker-2" \
 RUNS=5 \
 ./benchmark/restore-bench.sh
 ```
 
-Output: `restore-bench.csv` (one row per run) + a median summary:
+Single-mode (gcr only) also works: `RESTORE_YAML=deploy/restore-gcr.yaml ./benchmark/restore-bench.sh`.
+
+Output: `restore-bench.csv` + a comparison summary:
 
 ```
-[bench] MEDIAN over 5 successful restore(s):
-  total (to Running)        4.90 s
-  stage (tar+blob)          2.40 s
-  criu (cpu+control)        1.35 s
-    cuda_plugin             0.60 s
-  data remap (blob->GPU)    0.80 s
-  tar size                  0.30 GB
-  blob (GPU data)           2.86 GB
+[bench] MEDIAN per mode:
+  mode         total   usable    stage     criu  cuda_pl    remap   n
+  baseline      6.10     6.10     2.10     3.80     3.10        -    5
+  gcr           4.90     5.70     2.40     1.35     0.60     0.80    5
+
+[bench] gcr vs baseline (positive = gcr faster):
+  time-to-usable:  gcr 5.70s  baseline 6.10s  -> +0.40 s
+  time-to-Running: gcr 4.90s  baseline 6.10s  -> +1.20 s
 ```
 
 ## Env knobs
 
 | Var | Default | Meaning |
 |---|---|---|
-| `RESTORE_YAML` | (required) | the restore Pod manifest |
-| `NODE_SSH` | `""` (local) | host cmd access to the target node, e.g. `ssh jsj-worker-2` |
-| `RUNS` | `5` | repeats (median reported) |
+| `GCR_YAML` / `BASE_YAML` | — | the two restore manifests (give one or both) |
+| `RESTORE_YAML` | — | alias for `GCR_YAML` (single-mode, back-compat) |
+| `NODE_SSH` | `""` (local) | host cmd access to the target node |
+| `RUNS` | `5` | repeats per mode (median reported) |
 | `TIMEOUT` | `600` | per-run seconds to reach Running |
+| `REMAP_TIMEOUT` | `120` | gcr: max wait for the interceptor remap to finish |
 | `OUT` | `restore-bench.csv` | results CSV |
 | `CRIO_UNIT` / `AGENT_UNIT` | `crio` / `gpu-cr-restore-agent` | systemd units |
 | `DATA_DIR` / `STAGE_DIR` | `/var/lib/gcr-data` / `/var/lib/gpu-cr/restore` | blob / staged-tar dirs |
@@ -93,7 +99,7 @@ Output: `restore-bench.csv` (one row per run) + a median summary:
 ## Caveats
 
 - Phase timestamps come from journald receive time; sub-100 ms splits are approximate.
-- `restore.log` is only readable for **successful** restores (CRI-O removes it on
-  failure), so `criu_s`/`cuda_plugin_s` are blank for failed runs.
-- `remap_s` needs the restore-agent (crun path). If your runtime runs poststart hooks on
-  restore, the hook does the remap and the agent line may be absent.
+- `restore.log` is readable only for **successful** restores, so `criu_s`/`cuda_plugin_s`
+  are blank on failed runs.
+- Fair comparison requires the **same workload/model** checkpointed in both modes, the
+  same target node, and a pre-pulled image.
