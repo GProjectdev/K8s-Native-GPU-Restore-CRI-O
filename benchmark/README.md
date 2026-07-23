@@ -103,3 +103,42 @@ Output: `restore-bench.csv` + a comparison summary:
   are blank on failed runs.
 - Fair comparison requires the **same workload/model** checkpointed in both modes, the
   same target node, and a pre-pulled image.
+
+## Bulk generate + verify (restore-check.sh)
+
+If you already have many checkpoints (e.g. from the checkpoint bench), you don't have
+to hand-write a manifest each time. `restore-check.sh` takes your checkpoint **list**
+(the `ls`/status table — it only needs the **source-pod-uid** and the **`.tar` path**
+per line), generates a restore manifest for each, and — with `CHECK=1` — restores each
+one and reports **PASS/FAIL**, dumping the error (pod events + CRIU `restore.log` tail +
+CRI-O journal) when it fails.
+
+**Run it ON the target GPU node** (gen-restore-pod.sh needs the tar's driver-mount
+sources locally and the NFS mounted; `kubectl` must work here for `CHECK=1`).
+
+```bash
+# paste your table into ckpts.txt (one checkpoint per line), then:
+SERVER=10.178.0.14 NODE=jsj-worker-2 CHECK=1 CKPTS_FILE=ckpts.txt \
+  ./benchmark/restore-check.sh
+```
+
+Output (one row per checkpoint):
+
+```
+manifest                                   mode      check  time_s   note
+r-b-gcr-pytorch-gpt2-r1                     gcr       PASS   6.2      Running
+r-b-baseline-pytorch-facebook-opt-1-3b-r1  baseline  FAIL   9.8      phase=? -> see dump below
+  ----- FAIL dump: r-b-baseline-... -----
+    ... pod events ...
+    -- CRIU restore.log tail --
+    ... Error (criu/...): ...
+```
+
+- `mode` is inferred from the name (`-gcr-` → gcr, else baseline).
+- Manifests are written to `OUTDIR` (default `deploy/bench/`). The **PASS** ones can be
+  fed straight into `restore-bench.sh` (`GCR_YAML=deploy/bench/<gcr>.yaml
+  BASE_YAML=deploy/bench/<baseline>.yaml`).
+- `CHECK=0` only generates the manifests (apply them from the master yourself).
+
+Env: `SERVER` (NFS IP, required), `NODE`, `IMAGE`, `OUTDIR`, `CHECK`, `TIMEOUT`,
+`KUBECTL`, `NS`.
