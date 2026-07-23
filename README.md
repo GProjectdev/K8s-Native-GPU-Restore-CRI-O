@@ -73,7 +73,7 @@ sudo ./scripts/install-node.sh                         # hooks + config + dirs
 kubectl apply -f deploy/sample-restore-pod-l1.yaml     # fill placeholders first
 ```
 
-Full steps: [docs/SETUP.ko.md](docs/SETUP.ko.md).
+Full steps: [docs/SETUP.ko.md](docs/SETUP.ko.md). Restore timing: [benchmark/](benchmark/).
 
 ### Gotchas (learned the hard way)
 
