@@ -37,9 +37,11 @@ MODELS_PATH=${MODELS_PATH:-/models}; MODELS_HOSTPATH=${MODELS_HOSTPATH:-/mnt/nfs
 export MODELS_PATH MODELS_HOSTPATH
 [ -f "$TEMPLATE" ] || { echo "template not found: $TEMPLATE"; exit 1; }
 now(){ date +%s.%N; }; elapsed(){ awk "BEGIN{printf \"%.1f\", $(now)-$1}"; }
-nrun(){ if [ -n "$NODE_SSH" ]; then $NODE_SSH "$@"; else "$@"; fi; }
+# NOTE: </dev/null on the SSH path is REQUIRED — otherwise ssh reads the while-read
+# loop's stdin (the checkpoint list) and the loop stops after the first checkpoint.
+nrun(){ if [ -n "$NODE_SSH" ]; then $NODE_SSH "$@" </dev/null; else "$@"; fi; }
 # nsh runs a full shell command line on the node (pipes/||/redirs allowed)
-nsh(){ if [ -n "$NODE_SSH" ]; then $NODE_SSH "$1"; else bash -lc "$1"; fi; }
+nsh(){ if [ -n "$NODE_SSH" ]; then $NODE_SSH "$1" </dev/null; else bash -lc "$1"; fi; }
 DROP_CACHES=${DROP_CACHES:-0}
 drop_caches(){ [ "$DROP_CACHES" = 1 ] || return 0
   nsh "sync; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || sync" >/dev/null 2>&1 || true; }
