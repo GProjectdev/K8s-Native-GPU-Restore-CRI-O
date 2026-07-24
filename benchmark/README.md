@@ -113,14 +113,26 @@ per line), generates a restore manifest for each, and — with `CHECK=1` — res
 one and reports **PASS/FAIL**, dumping the error (pod events + CRIU `restore.log` tail +
 CRI-O journal) when it fails.
 
-**Run it ON the target GPU node** (gen-restore-pod.sh needs the tar's driver-mount
-sources locally and the NFS mounted; `kubectl` must work here for `CHECK=1`).
+Why it needs the node/NFS: `gen-restore-pod.sh` **reads each checkpoint tar** to pull
+the exact NVIDIA driver bind-mounts the original pod used (they live in the tar's
+`spec.dump`, paths vary per driver), so the tars must be readable and the driver
+sources present — i.e. the GPU node with the NFS mounted. The status table alone is
+not enough.
+
+Two ways to run:
 
 ```bash
-# paste your table into ckpts.txt (one checkpoint per line), then:
-SERVER=10.178.0.14 NODE=jsj-worker-2 CHECK=1 CKPTS_FILE=ckpts.txt \
-  ./benchmark/restore-check.sh
+# A) ON the target node (NFS mounted there, kubectl works there):
+SERVER=<nfs-ip> NODE=jsj-worker-2 CHECK=1 CKPTS_FILE=ckpts.txt ./benchmark/restore-check.sh
+
+# B) From the MASTER: SSH to the node for the tar-read + gen, kubectl runs locally:
+SERVER=<nfs-ip> NODE=jsj-worker-2 NODE_SSH="ssh jsj-worker-2" \
+  CHECK=1 CKPTS_FILE=ckpts.txt ./benchmark/restore-check.sh
 ```
+
+`SERVER` is the NFS server IP baked into the `nfs://` checkpoint-uri (must be mountable
+from the target node at restore time). `ckpts.txt` = your status table (a header line
+without a UUID is skipped automatically).
 
 Output (one row per checkpoint):
 

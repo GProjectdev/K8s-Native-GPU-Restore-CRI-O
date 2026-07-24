@@ -3,7 +3,9 @@
 # each, and optionally CHECK that each one restores (PASS/Running) — dumping the error
 # (pod events + CRIU restore.log tail + CRI-O journal) when it FAILS.
 #
-# RUN THIS ON THE TARGET GPU NODE: gen-restore-pod.sh reads each tar's spec.dump and
+# RUN ON THE TARGET GPU NODE, or run on the master with NODE_SSH="ssh <node>" (then tar
+# reads + gen-restore-pod.sh run on the node, kubectl runs locally).
+# gen-restore-pod.sh reads each tar's spec.dump and
 # needs the NVIDIA driver mount sources to exist locally, and the NFS must be mounted
 # so the tar path is readable. kubectl must work from here for CHECK=1 (else CHECK=0
 # and apply the generated manifests from the master).
@@ -22,10 +24,15 @@
 #   OUTDIR=deploy/bench       # where manifests are written
 #   CHECK=1                   # 1 = apply each + verify Running; 0 = only generate
 #   TIMEOUT=600  KUBECTL=kubectl  NS=default
+#   NODE_SSH="ssh jsj-worker-2"   # run node-only steps (tar read + gen) on the node
+#   NODE_GEN=<path to gen-restore-pod.sh on the node>   # default: same path as here
 #   CRIO_UNIT=crio            # for the failure dump
 set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"; repo="$(cd "$here/.." && pwd)"
 GEN="$repo/scripts/gen-restore-pod.sh"
+NODE_SSH=${NODE_SSH:-}
+NODE_GEN=${NODE_GEN:-$GEN}
+nrun(){ if [ -n "$NODE_SSH" ]; then $NODE_SSH "$@"; else "$@"; fi; }
 SERVER=${SERVER:?set SERVER to the NFS server IP (e.g. 10.178.0.14)}
 NODE=${NODE:-$(hostname)}
 IMAGE=${IMAGE:-pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime}
@@ -53,13 +60,15 @@ while IFS= read -r line; do
   yaml="$OUTDIR/$rname.yaml"
   N=$((N+1))
 
-  if [ ! -f "$tar" ]; then
-    printf '%-40s %-9s %-6s %-8s %s\n' "$rname" "$mode" "-" "-" "MISSING tar $tar (NFS mounted?)"; FAIL=$((FAIL+1)); continue
+  if ! nrun test -f "$tar"; then
+    printf '%-40s %-9s %-6s %-8s %s\n' "$rname" "$mode" "-" "-" "MISSING tar $tar (NFS mounted on the node?)"; FAIL=$((FAIL+1)); continue
   fi
-  if ! "$GEN" "$tar" --name "$rname" --uid "$uid" --node "$NODE" --image "$IMAGE" \
-        --uri "nfs://$SERVER$tar" > "$yaml" 2>/tmp/gen.err; then
-    printf '%-40s %-9s %-6s %-8s %s\n' "$rname" "$mode" "GENERR" "-" "$(tail -1 /tmp/gen.err)"; FAIL=$((FAIL+1)); continue
+  if [ -n "$NODE_SSH" ]; then
+    $NODE_SSH "$NODE_GEN '$tar' --name '$rname' --uid '$uid' --node '$NODE' --image '$IMAGE' --uri 'nfs://$SERVER$tar'" > "$yaml" 2>/tmp/gen.err || { printf '%-40s %-9s %-6s %-8s %s\n' "$rname" "$mode" "GENERR" "-" "$(tail -1 /tmp/gen.err)"; FAIL=$((FAIL+1)); continue; }
+  else
+    "$GEN" "$tar" --name "$rname" --uid "$uid" --node "$NODE" --image "$IMAGE" --uri "nfs://$SERVER$tar" > "$yaml" 2>/tmp/gen.err || { printf '%-40s %-9s %-6s %-8s %s\n' "$rname" "$mode" "GENERR" "-" "$(tail -1 /tmp/gen.err)"; FAIL=$((FAIL+1)); continue; }
   fi
+  [ -s "$yaml" ] || { printf '%-40s %-9s %-6s %-8s %s\n' "$rname" "$mode" "GENERR" "-" "empty manifest"; FAIL=$((FAIL+1)); continue; }
 
   if [ "$CHECK" != 1 ]; then
     printf '%-40s %-9s %-6s %-8s %s\n' "$rname" "$mode" "gen" "-" "$yaml"; continue
