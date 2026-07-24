@@ -154,3 +154,37 @@ r-b-baseline-pytorch-facebook-opt-1-3b-r1  baseline  FAIL   9.8      phase=? -> 
 
 Env: `SERVER` (NFS IP, required), `NODE`, `IMAGE`, `OUTDIR`, `CHECK`, `TIMEOUT`,
 `KUBECTL`, `NS`.
+
+## Fully-automatic over many checkpoints (restore-suite.sh)
+
+`restore-suite.sh` is the "just give me the list, it loops" version. It does exactly
+**apply → measure → delete → next** per checkpoint (and per mode), from the **master** —
+no per-tar node access — by reusing **one template manifest**.
+
+Why a template works: a restore Pod must carry the original container's NVIDIA driver
+bind-mounts, but in a **uniform cluster** (same driver on every node) that mount set is
+identical for every checkpoint. So you generate **one** reference manifest once (on a
+GPU node), and the suite just swaps the 3 per-checkpoint fields (`name`,
+`gpu-cr.io/checkpoint-uri`, `gpu-cr.io/source-pod-uid`).
+
+```bash
+# 1) one-time, on a GPU node — a template from ANY one checkpoint:
+./scripts/gen-restore-pod.sh /mnt/nfs/gcr/<any>.tar --name r-tmpl \
+  --uid <its-uid> --node jsj-worker-2 --image <img> \
+  --uri "nfs://<server>/mnt/nfs/gcr/<any>.tar" > deploy/restore-template.yaml
+#    copy deploy/restore-template.yaml to the master
+
+# 2) from the master — loop over the whole list:
+TEMPLATE=deploy/restore-template.yaml SERVER=10.178.0.14 CKPTS_FILE=ckpts.txt \
+RUNS=3 NODE_SSH="ssh jsj-worker-2" ./benchmark/restore-suite.sh
+```
+
+Output: per-model gcr-vs-baseline median (`total_s`, `usable_s`, `criu_s`, `remap_s`) +
+the `baseline − gcr` usable delta. `NODE_SSH` is only needed for the per-phase split
+(`total_s`/`usable_s` work without it). Needs `python3-yaml` on the runner.
+
+**Which script when:**
+- `restore-suite.sh` — many checkpoints, uniform cluster, one template → hands-off loop.
+- `restore-check.sh` — generate a real per-tar manifest for each + PASS/FAIL smoke test
+  (use when nodes/drivers differ, or to debug a specific failure).
+- `restore-bench.sh` — deep single/paired measurement from ready manifests.
