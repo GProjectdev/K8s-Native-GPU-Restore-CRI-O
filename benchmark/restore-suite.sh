@@ -38,6 +38,11 @@ export MODELS_PATH MODELS_HOSTPATH
 [ -f "$TEMPLATE" ] || { echo "template not found: $TEMPLATE"; exit 1; }
 now(){ date +%s.%N; }; elapsed(){ awk "BEGIN{printf \"%.1f\", $(now)-$1}"; }
 nrun(){ if [ -n "$NODE_SSH" ]; then $NODE_SSH "$@"; else "$@"; fi; }
+# nsh runs a full shell command line on the node (pipes/||/redirs allowed)
+nsh(){ if [ -n "$NODE_SSH" ]; then $NODE_SSH "$1"; else bash -lc "$1"; fi; }
+DROP_CACHES=${DROP_CACHES:-0}
+drop_caches(){ [ "$DROP_CACHES" = 1 ] || return 0
+  nsh "sync; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || sync" >/dev/null 2>&1 || true; }
 delta(){ [ -n "$1" ] && [ -n "$2" ] && awk "BEGIN{printf \"%.2f\", $2-$1}"; }
 CTR=$(awk '/containers:/{c=1} c&&/- *name:/{print $NF; exit}' "$TEMPLATE"); CTR=${CTR:-cuda-app}
 
@@ -73,6 +78,7 @@ echo "mode,model,run,total_s,usable_s,stage_s,criu_s,cuda_plugin_s,remap_s,tar_b
 measure(){ # $1=mode $2=model $3=name $4=uri $5=uid $6=run
   local mode=$1 model=$2 name=$3 uri=$4 uid=$5 idx=$6
   del_pod "$name"
+  drop_caches   # cold-cache stage timing when DROP_CACHES=1
   render "$name" "$uri" "$uid" | { local tmp; tmp=$(mktemp); cat > "$tmp"
     local since; since=$(( $(date +%s)-2 )); local t0; t0=$(now)
     $KUBECTL -n "$NS" apply -f "$tmp" >/dev/null 2>&1 || { echo "  [$mode $model r$idx] apply failed"; rm -f "$tmp"; row "$mode" "$model" "$idx" "" "" "" "" "" "" "" "" ApplyError; return; }
@@ -96,8 +102,11 @@ measure(){ # $1=mode $2=model $3=name $4=uri $5=uid $6=run
     CJ=$(nrun journalctl -u "$CRIO_UNIT" --since "@$since" -o short-unix --no-pager 2>/dev/null)
     AJ=$(nrun journalctl -u "$AGENT_UNIT" --since "@$since" -o short-unix --no-pager 2>/dev/null)
     if [ -n "$cid" ]; then
-      RLOG=$(nrun cat "/run/containers/storage/overlay-containers/$cid/userdata/restore.log" 2>/dev/null)
-      [ -z "$RLOG" ] && RLOG=$(nrun cat "/var/lib/containers/storage/overlay-containers/$cid/userdata/restore.log" 2>/dev/null)
+      RLOG=$(nsh "cat /run/containers/storage/overlay-containers/$cid/userdata/restore.log 2>/dev/null || cat /var/lib/containers/storage/overlay-containers/$cid/userdata/restore.log 2>/dev/null")
+      if [ -z "$RLOG" ]; then
+        local rp; rp=$(nsh "find /run/containers/storage /var/lib/containers/storage -name restore.log -mmin -3 2>/dev/null | head -1")
+        [ -n "$rp" ] && RLOG=$(nsh "cat '$rp' 2>/dev/null")
+      fi
     fi
     tar_bytes=$(nrun stat -c %s "$STAGE_DIR/$CTR-Checkpoint.tar" 2>/dev/null|tr -dc '0-9')
     local ann se
@@ -147,10 +156,10 @@ def med(rs,c):
   v=[float(x[c]) for x in rs if x.get(c) not in ("",None,"?")]; return statistics.median(v) if v else float("nan")
 if not rows: print("\n[suite] no successful restores."); sys.exit(0)
 print("\n[suite] MEDIAN (usable_s = time until workload runs on the GPU):")
-print("  %-14s %-9s %8s %8s %8s %8s %3s"%("model","mode","total","usable","criu","remap","n"))
+print("  %-14s %-9s %8s %8s %8s %8s %8s %3s"%("model","mode","total","usable","criu","cuda_pl","remap","n"))
 for k in sorted(g):
   rs=g[k]; f=lambda c:(lambda m:"%8.2f"%m if m==m else "%8s"%"-")(med(rs,c))
-  print("  %-14s %-9s %s %s %s %s %3d"%(k[0],k[1],f("total_s"),f("usable_s"),f("criu_s"),f("remap_s"),len(rs)))
+  print("  %-14s %-9s %s %s %s %s %s %3d"%(k[0],k[1],f("total_s"),f("usable_s"),f("criu_s"),f("cuda_plugin_s"),f("remap_s"),len(rs)))
 print("\n[suite] gcr vs baseline usable (positive = gcr faster):")
 by=defaultdict(dict)
 for (mdl,mode) in g: by[mdl][mode]=med(g[(mdl,mode)],"usable_s")
