@@ -95,7 +95,10 @@ measure(){ # $1=mode $2=model $3=name $4=uri $5=uid $6=run
     local CJ AJ RLOG tar_bytes blob_bytes stage_s criu_s cuda_s remap_s
     CJ=$(nrun journalctl -u "$CRIO_UNIT" --since "@$since" -o short-unix --no-pager 2>/dev/null)
     AJ=$(nrun journalctl -u "$AGENT_UNIT" --since "@$since" -o short-unix --no-pager 2>/dev/null)
-    [ -n "$cid" ] && RLOG=$(nrun cat "/run/containers/storage/overlay-containers/$cid/userdata/restore.log" 2>/dev/null)
+    if [ -n "$cid" ]; then
+      RLOG=$(nrun cat "/run/containers/storage/overlay-containers/$cid/userdata/restore.log" 2>/dev/null)
+      [ -z "$RLOG" ] && RLOG=$(nrun cat "/var/lib/containers/storage/overlay-containers/$cid/userdata/restore.log" 2>/dev/null)
+    fi
     tar_bytes=$(nrun stat -c %s "$STAGE_DIR/$CTR-Checkpoint.tar" 2>/dev/null|tr -dc '0-9')
     local ann se
     ann=$(echo "$CJ"|grep -m1 'restore annotation detected'|awk '{print $1}')
@@ -104,6 +107,8 @@ measure(){ # $1=mode $2=model $3=name $4=uri $5=uid $6=run
     stage_s=$(delta "$ann" "$se")
     criu_s=$(echo "$RLOG"|awk -F'[()]' '/^\([0-9]/{t=$2} END{if(t!="")printf "%.3f",t}')
     local cs ce; cs=$(echo "$RLOG"|grep -m1 cuda_plugin|sed -nE 's/^\(([0-9.]+)\).*/\1/p'); ce=$(echo "$RLOG"|grep cuda_plugin|tail -1|sed -nE 's/^\(([0-9.]+)\).*/\1/p'); cuda_s=$(delta "$cs" "$ce")
+    # fallback: derive CRIU-restore window from wall clock when restore.log is unavailable
+    if [ -z "$criu_s" ] && [ -n "$stage_s" ]; then criu_s=$(awk "BEGIN{v=$total_s-$stage_s-0${remap_s:+ -$remap_s}; if(v<0)v=0; printf \"%.2f\", v}"); fi
     if [ "$mode" = gcr ]; then local r0 r1; r0=$(echo "$AJ"|grep 'remapping GPU data'|tail -1|awk '{print $1}'); r1=$(echo "$AJ"|grep 'GPU restore complete'|tail -1|awk '{print $1}'); remap_s=$(delta "$r0" "$r1"); usable_s=$(delta "$t0" "$r1"); [ -z "$usable_s" ] && usable_s="$ack_wall"; else usable_s=$total_s; fi
     echo "  [$mode $model r$idx] total=${total_s}s usable=${usable_s:-?}s stage=${stage_s:-?} criu=${criu_s:-?} remap=${remap_s:-n/a}"
     row "$mode" "$model" "$idx" "$total_s" "${usable_s:-}" "${stage_s:-}" "${criu_s:-}" "${cuda_s:-}" "${remap_s:-}" "${tar_bytes:-}" "${blob_bytes:-}" Running
