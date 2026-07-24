@@ -87,7 +87,7 @@ measure(){ # $1=mode $2=model $3=name $4=uri $5=uid $6=run
     if [ "$ready" != true ]; then
       echo "  [$mode $model r$idx] NOT running ${total_s}s (phase=${phase:-?})"
       $KUBECTL -n "$NS" describe pod "$name" 2>/dev/null | sed -n '/Events:/,$p' | tail -6 | sed 's/^/      /'
-      row "$mode" "$model" "$idx" "$total_s" "" "" "" "" "" "" "" "${phase:-NotRunning}"; return; fi
+      row "$mode" "$model" "$idx" "$total_s" "" "" "" "" "" "" "" "${phase:-NotRunning}"; del_pod "$name"; return; fi
     local cid; cid=$($KUBECTL -n "$NS" get pod "$name" -o jsonpath='{.status.containerStatuses[0].containerID}' 2>/dev/null|sed 's#.*/##'); local cid12=${cid:0:12}
     local usable_s="" ack_wall=""
     if [ "$mode" = gcr ]; then local w0; w0=$(now); while awk "BEGIN{exit !($(elapsed "$w0")<$REMAP_TIMEOUT)}"; do
@@ -107,6 +107,7 @@ measure(){ # $1=mode $2=model $3=name $4=uri $5=uid $6=run
     if [ "$mode" = gcr ]; then local r0 r1; r0=$(echo "$AJ"|grep 'remapping GPU data'|tail -1|awk '{print $1}'); r1=$(echo "$AJ"|grep 'GPU restore complete'|tail -1|awk '{print $1}'); remap_s=$(delta "$r0" "$r1"); usable_s=$(delta "$t0" "$r1"); [ -z "$usable_s" ] && usable_s="$ack_wall"; else usable_s=$total_s; fi
     echo "  [$mode $model r$idx] total=${total_s}s usable=${usable_s:-?}s stage=${stage_s:-?} criu=${criu_s:-?} remap=${remap_s:-n/a}"
     row "$mode" "$model" "$idx" "$total_s" "${usable_s:-}" "${stage_s:-}" "${criu_s:-}" "${cuda_s:-}" "${remap_s:-}" "${tar_bytes:-}" "${blob_bytes:-}" Running
+    del_pod "$name"   # free the GPU before the next run/checkpoint (single-GPU nodes)
   }
 }
 
