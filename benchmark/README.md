@@ -180,8 +180,19 @@ RUNS=3 NODE_SSH="ssh jsj-worker-2" ./benchmark/restore-suite.sh
 ```
 
 Output: per-model gcr-vs-baseline median (`total_s`, `usable_s`, `criu_s`, `remap_s`) +
-the `baseline − gcr` usable delta. `NODE_SSH` is only needed for the per-phase split
-(`total_s`/`usable_s` work without it). Needs `python3-yaml` on the runner.
+the `baseline − gcr` usable delta.
+
+**`NODE_SSH` is OPTIONAL** — the apply/measure/delete loop is pure kubectl from the
+master. Drop `NODE_SSH` and you still get `total_s` and `usable_s` (the two headline
+numbers); only the per-phase split (`stage_s`/`criu_s`/`cuda_plugin_s`/`remap_s`) needs
+to read the node's journals/`restore.log`, which is what `NODE_SSH` is for. Needs
+`python3-yaml` on the runner.
+
+```bash
+# simplest — no node access, just deploy/measure/delete:
+TEMPLATE=deploy/restore-template.yaml SERVER=10.178.0.14 CKPTS_FILE=ckpts.txt \\
+RUNS=3 ./benchmark/restore-suite.sh
+```
 
 **Which script when:**
 - `restore-suite.sh` — many checkpoints, uniform cluster, one template → hands-off loop.

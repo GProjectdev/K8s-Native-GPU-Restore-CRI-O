@@ -75,9 +75,9 @@ measure(){ # $1=mode $2=model $3=name $4=uri $5=uid $6=run
       $KUBECTL -n "$NS" describe pod "$name" 2>/dev/null | sed -n '/Events:/,$p' | tail -6 | sed 's/^/      /'
       row "$mode" "$model" "$idx" "$total_s" "" "" "" "" "" "" "" "${phase:-NotRunning}"; return; fi
     local cid; cid=$($KUBECTL -n "$NS" get pod "$name" -o jsonpath='{.status.containerStatuses[0].containerID}' 2>/dev/null|sed 's#.*/##'); local cid12=${cid:0:12}
-    local usable_s=""
+    local usable_s="" ack_wall=""
     if [ "$mode" = gcr ]; then local w0; w0=$(now); while awk "BEGIN{exit !($(elapsed "$w0")<$REMAP_TIMEOUT)}"; do
-        $KUBECTL -n "$NS" logs "$name" 2>/dev/null | grep -q 'restore ACK sent' && break; sleep 1; done; fi
+        if $KUBECTL -n "$NS" logs "$name" 2>/dev/null | grep -q 'restore ACK sent'; then ack_wall=$(elapsed "$t0"); break; fi; sleep 1; done; fi
     local CJ AJ RLOG tar_bytes blob_bytes stage_s criu_s cuda_s remap_s
     CJ=$(nrun journalctl -u "$CRIO_UNIT" --since "@$since" -o short-unix --no-pager 2>/dev/null)
     AJ=$(nrun journalctl -u "$AGENT_UNIT" --since "@$since" -o short-unix --no-pager 2>/dev/null)
@@ -90,7 +90,7 @@ measure(){ # $1=mode $2=model $3=name $4=uri $5=uid $6=run
     stage_s=$(delta "$ann" "$se")
     criu_s=$(echo "$RLOG"|awk -F'[()]' '/^\([0-9]/{t=$2} END{if(t!="")printf "%.3f",t}')
     local cs ce; cs=$(echo "$RLOG"|grep -m1 cuda_plugin|sed -nE 's/^\(([0-9.]+)\).*/\1/p'); ce=$(echo "$RLOG"|grep cuda_plugin|tail -1|sed -nE 's/^\(([0-9.]+)\).*/\1/p'); cuda_s=$(delta "$cs" "$ce")
-    if [ "$mode" = gcr ]; then local r0 r1; r0=$(echo "$AJ"|grep 'remapping GPU data'|tail -1|awk '{print $1}'); r1=$(echo "$AJ"|grep 'GPU restore complete'|tail -1|awk '{print $1}'); remap_s=$(delta "$r0" "$r1"); usable_s=$(delta "$t0" "$r1"); else usable_s=$total_s; fi
+    if [ "$mode" = gcr ]; then local r0 r1; r0=$(echo "$AJ"|grep 'remapping GPU data'|tail -1|awk '{print $1}'); r1=$(echo "$AJ"|grep 'GPU restore complete'|tail -1|awk '{print $1}'); remap_s=$(delta "$r0" "$r1"); usable_s=$(delta "$t0" "$r1"); [ -z "$usable_s" ] && usable_s="$ack_wall"; else usable_s=$total_s; fi
     echo "  [$mode $model r$idx] total=${total_s}s usable=${usable_s:-?}s stage=${stage_s:-?} criu=${criu_s:-?} remap=${remap_s:-n/a}"
     row "$mode" "$model" "$idx" "$total_s" "${usable_s:-}" "${stage_s:-}" "${criu_s:-}" "${cuda_s:-}" "${remap_s:-}" "${tar_bytes:-}" "${blob_bytes:-}" Running
   }
