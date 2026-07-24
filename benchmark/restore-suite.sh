@@ -107,7 +107,9 @@ while IFS= read -r line; do
   model=$(echo "$pod"|sed -E 's/^b-(gcr|baseline)-//; s/-r[0-9]+$//')
   name=$(echo "r-$pod"|tr '._' '--'|cut -c1-58|sed 's/-*$//')
   uri="nfs://$SERVER$tar"
-  if ! nrun test -f "$tar"; then echo "  [$mode $model] MISSING tar $tar (NFS mounted on node?)"; row "$mode" "$model" "" "" "" "" "" "" "" "" "" MissingTar; continue; fi
+  # NOTE: the suite uses a TEMPLATE (no per-tar read); the CRI-O on the target node
+  # fetches the tar via this nfs:// uri at restore time. So the runner does NOT need
+  # the tar visible, and NODE_SSH is only for the optional phase split.
   echo "=== $mode / $model ($name) ==="
   for r in $(seq 1 "$RUNS"); do measure "$mode" "$model" "$name" "$uri" "$uid" "$r"; done
   LAST="$name"
