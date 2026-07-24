@@ -96,6 +96,7 @@ Output: `restore-bench.csv` + a comparison summary:
 | `DATA_DIR` / `STAGE_DIR` | `/var/lib/gcr-data` / `/var/lib/gpu-cr/restore` | blob / staged-tar dirs |
 | `KEEP_LAST` | `0` | `1` = leave the last restored pod running |
 | `DROP_CACHES` | `0` | `1` = `echo 3 > drop_caches` on the node before each run (cold-cache stage timing; needs root on the node) |
+| `SCHEME` / `LOCAL_DIR` | `nfs` / `/var/lib/gcr-local` | `SCHEME=hostpath` stages from a LOCAL copy of the .tar/.blob (removes NFS from staging, so total reflects criu+remap). Pre-copy the files to `LOCAL_DIR` on the node. |
 
 ## Caveats
 

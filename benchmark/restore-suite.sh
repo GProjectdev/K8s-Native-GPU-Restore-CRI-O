@@ -43,6 +43,8 @@ nrun(){ if [ -n "$NODE_SSH" ]; then $NODE_SSH "$@" </dev/null; else "$@"; fi; }
 # nsh runs a full shell command line on the node (pipes/||/redirs allowed)
 nsh(){ if [ -n "$NODE_SSH" ]; then $NODE_SSH "$1" </dev/null; else bash -lc "$1"; fi; }
 DROP_CACHES=${DROP_CACHES:-0}
+SCHEME=${SCHEME:-nfs}                    # nfs | hostpath  (hostpath = stage from a LOCAL copy)
+LOCAL_DIR=${LOCAL_DIR:-/var/lib/gcr-local}   # node dir holding local .tar/.blob copies (hostpath mode)
 drop_caches(){ [ "$DROP_CACHES" = 1 ] || return 0
   nsh "sync; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || sync" >/dev/null 2>&1 || true; }
 delta(){ [ -n "$1" ] && [ -n "$2" ] && awk "BEGIN{printf \"%.2f\", $2-$1}"; }
@@ -137,7 +139,10 @@ while IFS= read -r line; do
   case "$pod" in *-gcr-*) mode=gcr;; *baseline*) mode=baseline;; *) mode=gcr;; esac
   model=$(echo "$pod"|sed -E 's/^b-(gcr|baseline)-//; s/-r[0-9]+$//')
   name=$(echo "r-$pod"|tr '._' '--'|cut -c1-58|sed 's/-*$//')
-  uri="nfs://$SERVER$tar"
+  case "$SCHEME" in
+    hostpath) uri="hostpath://$LOCAL_DIR/$(basename "$tar")";;   # local copy -> no NFS in staging
+    *)        uri="nfs://$SERVER$tar";;
+  esac
   # NOTE: the suite uses a TEMPLATE (no per-tar read); the CRI-O on the target node
   # fetches the tar via this nfs:// uri at restore time. So the runner does NOT need
   # the tar visible, and NODE_SSH is only for the optional phase split.
