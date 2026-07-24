@@ -33,6 +33,8 @@ NODE_SSH=${NODE_SSH:-}; OUT=${OUT:-restore-suite.csv}
 CRIO_UNIT=${CRIO_UNIT:-crio}; AGENT_UNIT=${AGENT_UNIT:-gpu-cr-restore-agent}
 KUBECTL=${KUBECTL:-kubectl}; NS=${NS:-default}
 DATA_DIR=${DATA_DIR:-/var/lib/gcr-data}; STAGE_DIR=${STAGE_DIR:-/var/lib/gpu-cr/restore}; KEEP_LAST=${KEEP_LAST:-0}
+MODELS_PATH=${MODELS_PATH:-/models}; MODELS_HOSTPATH=${MODELS_HOSTPATH:-/mnt/nfs/models}
+export MODELS_PATH MODELS_HOSTPATH
 [ -f "$TEMPLATE" ] || { echo "template not found: $TEMPLATE"; exit 1; }
 now(){ date +%s.%N; }; elapsed(){ awk "BEGIN{printf \"%.1f\", $(now)-$1}"; }
 nrun(){ if [ -n "$NODE_SSH" ]; then $NODE_SSH "$@"; else "$@"; fi; }
@@ -48,6 +50,18 @@ d=yaml.safe_load(open(tpl))
 d["metadata"]["name"]=name
 a=d["metadata"].setdefault("annotations",{})
 a["gpu-cr.io/restore"]="true"; a["gpu-cr.io/checkpoint-uri"]=uri; a["gpu-cr.io/source-pod-uid"]=uid
+# Some checkpoints bind-mount the model dir (/models); CRI-O requires every checkpoint
+# mount be defined in the restore pod. Ensure it's present (harmless extra for those
+# that didn't use it). Configurable via MODELS_PATH / MODELS_HOSTPATH ("" to disable).
+import os
+mp=os.environ.get("MODELS_PATH","/models"); mh=os.environ.get("MODELS_HOSTPATH","/mnt/nfs/models")
+if mp and mh:
+    c=d["spec"]["containers"][0]; vms=c.setdefault("volumeMounts",[])
+    if not any(v.get("mountPath")==mp for v in vms):
+        vms.append({"name":"models","mountPath":mp,"readOnly":True})
+        vols=d["spec"].setdefault("volumes",[])
+        if not any(v.get("name")=="models" for v in vols):
+            vols.append({"name":"models","hostPath":{"path":mh}})
 print(yaml.safe_dump(d,default_flow_style=False,sort_keys=False))
 PY
 }
