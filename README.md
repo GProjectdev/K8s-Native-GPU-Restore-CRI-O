@@ -1,5 +1,13 @@
 # K8s-Native-GPU-Restore-CRI-O
 
+> **Branch `v1.0` — GCR-only (cuda-checkpoint) control.** This branch restores the GPU
+> *control state* with the NVIDIA **`cuda-checkpoint`** host helper (restore → gate → unlock),
+> not CRIU's `cuda_plugin` (that is the `main` branch, "GCR+CRIUgpu"). The GPU *data* path
+> (external `.blob` staged by CRI-O + in-Pod interceptor remap) and all other machinery
+> (cri-o v1.33 patch, tcp-close handling, benchmark suite, cold-start) are identical to `main`.
+> Restore a checkpoint taken by the checkpoint repo's **`v1.0`** branch (GCR-only method).
+> Prereq on every GPU/restore node: `/usr/bin/cuda-checkpoint` (ships with recent NVIDIA driver).
+
 Custom CRI-O that **restores** a GPU workload from a `Checkpoint.tar` produced by
 [K8s-Native-Fast-GPU-Checkpoint-Restore-System](https://github.com/GProjectdev/K8s-Native-Fast-GPU-Checkpoint-Restore-System).
 It is a **minimal patch on CRI-O's native restore path** (in the spirit of the
