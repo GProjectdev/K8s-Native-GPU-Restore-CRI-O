@@ -13,10 +13,12 @@
 #   WORKLOAD_YAML=deploy/opt-1.3b-pod.yaml   # REQUIRED (a READY-printing loader pod)
 #   MODELS="/models/gpt2 /models/gpt2-large /models/opt-1.3b /models/opt-6.7b"  # REQUIRED
 #   RUNS=3  TIMEOUT=1200  READY_RE='^READY'  OUT=cold-start.csv  NS=default  KUBECTL=kubectl
+#   SUITE_CSV=restore-suite.csv  # optional: also print cold-start VS restore (usable) + speedup
 set -uo pipefail
 WORKLOAD_YAML=${WORKLOAD_YAML:?set WORKLOAD_YAML to a workload pod that prints READY}
 MODELS=${MODELS:?set MODELS to a space-separated list of MODEL values (e.g. /models/gpt2 ...)}
 RUNS=${RUNS:-3}; TIMEOUT=${TIMEOUT:-1200}; READY_RE=${READY_RE:-'^READY'}
+SUITE_CSV=${SUITE_CSV:-}
 OUT=${OUT:-cold-start.csv}; NS=${NS:-default}; KUBECTL=${KUBECTL:-kubectl}
 [ -f "$WORKLOAD_YAML" ] || { echo "workload manifest not found: $WORKLOAD_YAML"; exit 1; }
 now(){ date +%s.%N; }; elapsed(){ awk "BEGIN{printf \"%.1f\", $(now)-$1}"; }
@@ -74,3 +76,39 @@ if not rows: print("\n[cold] no successful cold starts."); sys.exit(0)
 print("\n[cold] MEDIAN cold-start (apply -> READY):")
 for m in sorted(g): print("  %-24s %8.1f s  (n=%d)"%(m, statistics.median(g[m]), len(g[m])))
 PY
+
+# ---- optional: cold start VS restore (usable) comparison + speedup ----
+if [ -n "$SUITE_CSV" ] && [ -f "$SUITE_CSV" ]; then
+python3 - "$OUT" "$SUITE_CSV" <<'PYCMP'
+import csv,sys,statistics,re
+from collections import defaultdict
+cold_csv,suite_csv=sys.argv[1],sys.argv[2]
+def key(x):
+    x=x.lower(); x=re.sub(r'[/._]','-',x)
+    for t in ('pytorch','facebook','models','tensorflow'): x=x.replace(t,'')
+    return re.sub(r'-+','-',x).strip('-')
+cm=defaultdict(list)
+for r in csv.DictReader(open(cold_csv)):
+    if r.get("phase")=="Ready": cm[key(r["model"])].append(float(r["cold_start_s"]))
+cold={k:statistics.median(v) for k,v in cm.items()}
+rm=defaultdict(list)
+for r in csv.DictReader(open(suite_csv)):
+    if r.get("phase")=="Running" and r.get("usable_s") not in ("",None,"?"):
+        rm[(key(r["model"]),r["mode"])].append(float(r["usable_s"]))
+res={k:statistics.median(v) for k,v in rm.items()}
+keys=sorted(set(cold) & set(k for (k,_) in res))
+if not keys:
+    print("\n[compare] no overlapping models between cold-start and restore-suite (check names)."); sys.exit(0)
+print("\n[compare] cold start vs restore (median usable); speedup = cold / restore:")
+print("  %-14s %10s %10s %10s %9s %9s"%("model","cold(s)","base(s)","gcr(s)","cold/base","cold/gcr"))
+o=open("compare-cold-vs-restore.csv","w",newline=""); w=csv.writer(o)
+w.writerow(["model","cold_s","baseline_restore_s","gcr_restore_s","speedup_cold_over_baseline","speedup_cold_over_gcr"])
+for k in keys:
+    c=cold[k]; b=res.get((k,"baseline"),float("nan")); gg=res.get((k,"gcr"),float("nan"))
+    sb=c/b if b==b and b else float("nan"); sg=c/gg if gg==gg and gg else float("nan")
+    f=lambda v:("%10.1f"%v if v==v else "%10s"%"-"); fx=lambda v:("%8.1fx"%v if v==v else "%9s"%"-")
+    print("  %-14s %s %s %s %s %s"%(k,f(c),f(b),f(gg),fx(sb),fx(sg)))
+    w.writerow([k,round(c,1),"" if b!=b else round(b,1),"" if gg!=gg else round(gg,1),"" if sb!=sb else round(sb,1),"" if sg!=sg else round(sg,1)])
+o.close(); print("\n[compare] -> compare-cold-vs-restore.csv")
+PYCMP
+fi

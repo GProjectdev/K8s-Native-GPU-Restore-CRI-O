@@ -217,7 +217,17 @@ RUNS=3 ./benchmark/cold-start.sh
 
 For each MODEL it swaps the pod name + `MODEL` env, applies, waits for a log line
 matching `READY_RE` (default `^READY`), records apply->READY, deletes, repeats. Compare
-the median cold-start against the restore `usable_s` from restore-suite.sh:
-`speedup = cold_start / restore_usable`. Requires each model present under the pod's
-`/models` mount and the image pre-pulled.
+the restore `usable_s` from restore-suite.sh. Pass `SUITE_CSV=restore-suite.csv` to have
+cold-start.sh print the **cold-start vs baseline-restore vs gcr-restore** table and the
+speedup (`= cold_start / restore_usable`), writing `compare-cold-vs-restore.csv`:
+
+```bash
+WORKLOAD_YAML=deploy/opt-1.3b-pod.yaml \
+MODELS="/models/gpt2 /models/gpt2-large /models/opt-1.3b /models/opt-6.7b" \
+SUITE_CSV=restore-suite.csv RUNS=3 ./benchmark/cold-start.sh
+```
+
+Model names are normalized so `/models/opt-1.3b` matches the suite's
+`pytorch-facebook-opt-1-3b`. Requires each model under the pod's `/models` mount and the
+image pre-pulled.
 
