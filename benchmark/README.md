@@ -201,3 +201,23 @@ RUNS=3 ./benchmark/restore-suite.sh
 - `restore-check.sh` — generate a real per-tar manifest for each + PASS/FAIL smoke test
   (use when nodes/drivers differ, or to debug a specific failure).
 - `restore-bench.sh` — deep single/paired measurement from ready manifests.
+
+## Cold-start baseline (cold-start.sh)
+
+The number restore is compared against: bring a workload up **from scratch** (no
+checkpoint) and measure apply -> `READY` (model loaded + warmed up). Needs the
+**workload** pod (a READY-printing loader), not a restore manifest. Pure kubectl —
+no node access.
+
+```bash
+WORKLOAD_YAML=deploy/opt-1.3b-pod.yaml \
+MODELS="/models/gpt2 /models/gpt2-large /models/opt-1.3b /models/opt-6.7b" \
+RUNS=3 ./benchmark/cold-start.sh
+```
+
+For each MODEL it swaps the pod name + `MODEL` env, applies, waits for a log line
+matching `READY_RE` (default `^READY`), records apply->READY, deletes, repeats. Compare
+the median cold-start against the restore `usable_s` from restore-suite.sh:
+`speedup = cold_start / restore_usable`. Requires each model present under the pod's
+`/models` mount and the image pre-pulled.
+
