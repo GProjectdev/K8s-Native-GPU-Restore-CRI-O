@@ -26,9 +26,10 @@ crio-patch/server/gpu_cr_restore.go            # stageGPUCheckpoint(): fetch the
                                                 # checkpoint-uri onto the node and
                                                 # point the image at the local tar
 crio-patch/0001-create-stage-gpu-checkpoint.patch  # 1-line call in CreateContainer
-                                                # (applies cleanly to cri-o v1.35.0)
-oci-hooks/gpu-cr-restore.json + hooks/          # poststart hook: GPU control-state
-                                                # restore + data-buffer remap
+                                                # (targets cri-o v1.33.x; build default v1.33.13)
+oci-hooks/gpu-cr-restore.json + hooks/          # poststart hook + restore-agent:
+                                                # GPU data-buffer remap (control
+                                                # state comes back via CRIUgpu)
 ```
 
 ## Restore flow
@@ -36,12 +37,14 @@ oci-hooks/gpu-cr-restore.json + hooks/          # poststart hook: GPU control-st
 ```
 1  apply Restore Pod yaml   (image = checkpoint archive path)
 2  scheduler picks node     (experiment: nodeSelector)
-2.5 Custom CRI-O STAGES the tar from gpu-cr.io/checkpoint-uri onto the node
+2.5 Custom CRI-O STAGES two artifacts onto the node:
+      - the checkpoint .tar (CPU + GPU control state)  -> container image
+      - the sibling .blob (GPU memory data)            -> /var/lib/gcr-data/<uid>/data.blob
 3  kubelet -> CRI-O detects the local archive
-4  CRIU restore             (container + CPU process)
-5  poststart hook: GPU control state  (cuda-checkpoint --restore via host helper)
-6  poststart hook: GPU data buffers   (interceptor remap to SAME VA + H2D)
-7  workload resumes
+4  CRIU restore + cuda_plugin  (container + CPU process AND GPU control state — CRIUgpu)
+5  restore-agent detects the restored container (gpu-cr.io/restore=true)
+6  data remap: interceptor re-opens the .blob, recreates physical + SAME VA + H2D
+7  gated kernel launches unblock -> workload resumes
 8  CRI-O/kubelet register it as a normal Running container
 ```
 
@@ -64,13 +67,25 @@ spec:
 ## Quick start
 
 ```bash
-./hack/build-crio.sh                                   # build patched cri-o v1.35.0
+./hack/build-crio.sh                                   # build patched cri-o (match node; default v1.33.13)
 sudo install -m0755 /tmp/cri-o-gpu-cr/bin/crio "$(command -v crio)"   # per node
 sudo ./scripts/install-node.sh                         # hooks + config + dirs
 kubectl apply -f deploy/sample-restore-pod-l1.yaml     # fill placeholders first
 ```
 
-Full steps: [docs/SETUP.ko.md](docs/SETUP.ko.md).
+Full steps: [docs/SETUP.ko.md](docs/SETUP.ko.md). Restore timing: [benchmark/](benchmark/).
+
+### Gotchas (learned the hard way)
+
+- **Build the CRI-O version your node runs** (`crio --version` → `CRIO_VERSION=v1.33.x`).
+  The patch anchors assume the 1.33 line; other versions may need a rebase.
+- **crun >= 1.9** on every node.
+- **Socket-clean checkpoints.** A workload holding a TCP socket at checkpoint fails to
+  restore (`CRIU -52 / Need to set the --tcp-close options`) because CRI-O/crun does not
+  pass `tcp-close` on restore. Make the workload offline (e.g. load models from a local
+  path, `HF_HUB_OFFLINE=1`) and remove `tcp-close` from the source node's
+  `/etc/criu/default.conf` so the checkpoint carries no socket state. See docs/SETUP.ko.md §7.
+- **Model files:** load from a path mounted identically on source AND restore nodes.
 
 ## Status
 
@@ -79,6 +94,6 @@ v1.33.13 (K8s v1.33, NVIDIA driver 570.211.01, A100):** same-node restore and
 cross-node migration (worker-1 → worker-2, checkpoint pulled over HTTP) both
 resume the workload with a bit-exact GPU checksum, fully automatic via the
 restore-agent (just `kubectl apply`). The patch set (0001–0004) applies cleanly to
-cri-o v1.35.0 and v1.33.13. Assumptions and remaining points are in
+cri-o v1.33.x (verified end-to-end on v1.33.13; anchors assume 1.33.x). Assumptions and remaining points are in
 [docs/DESIGN.ko.md](docs/DESIGN.ko.md); cross-node steps in
 [docs/MIGRATION.ko.md](docs/MIGRATION.ko.md).

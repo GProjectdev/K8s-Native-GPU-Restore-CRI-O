@@ -17,7 +17,7 @@
 체크포인트 측이 CRI-O를 포크하지 않고 kubelet checkpoint API를 쓴 것과 달리, **복원은
 kubelet에 대응 API가 없고** 런타임 레벨 통합이 필요하다. CRI-O는 이미 견고한 복원 경로를
 갖고 있으므로, 그걸 재구현(shim)하기보다 **그 경로에 staging만 더하는 최소 포크**가 가장
-적합하다. GPU 단계는 체크포인트 측과 동일하게 host helper + 인터셉터에 위임한다.
+적합하다. GPU 제어상태는 CRIU + cuda_plugin(CRIUgpu)이 복원하고, 데이터는 인터셉터가 remap한다.
 
 ## CRI-O가 복원으로 분기하는 조건 (포크의 근거)
 
@@ -59,46 +59,82 @@ annotation으로 **전파**한다(안 되면 런타임에 `allowed_annotations` 
 
 ## 패치 (crio-patch/)
 
-- **`server/gpu_cr_restore.go`** (새 파일): `stageGPUCheckpoint(ctx, cfg)` —
-  `gpu-cr.io/restore=true`면 `gpu-cr.io/checkpoint-uri`를 노드로 staging
-  (file/hostpath/nfs/https) 후 `cfg.Image`를 로컬 아카이브 경로로 교체. 아니면 no-op.
+- **`server/gpu_cr_restore.go`** (새 파일): `stageGPUCheckpoint(ctx, sbAnn, cfg)` —
+  `gpu-cr.io/restore=true`면 **두 파일**을 노드로 staging (file/hostpath/nfs/https):
+  (a) `gpu-cr.io/checkpoint-uri`의 **`.tar`**(CPU+제어상태) → `cfg.Image`를 로컬 경로로 교체,
+  (b) 형제 **`.blob`**(GPU 데이터) → `/var/lib/gcr-data/<source-uid>/data.blob`. `.blob` URI는
+  기본적으로 `.tar`→`.blob`로 유도하며 `gpu-cr.io/data-uri`로 오버라이드. 아니면 no-op.
 - **`0001-create-stage-gpu-checkpoint.patch`**: `CreateContainer` 최상단(체크포인트 감지
-  직전)에 `s.stageGPUCheckpoint(...)` 호출 1줄 삽입. cri-o **v1.35.0**에 clean apply 확인.
+  직전)에 `s.stageGPUCheckpoint(...)` 호출 1줄 삽입. cri-o **v1.33.x**에 clean apply 확인.
 
-## GPU 복원 = OCI poststart hook (oci-hooks/, hooks/)
+## GPU 복원 = CRIUgpu(제어상태) + 인터셉터 remap(데이터)
 
-CRIU가 CPU 프로세스를 복원하면(이때 host 상주 GPU 제어상태·데이터버퍼가 평범한 프로세스
-메모리로 함께 복귀), CRI-O가 등록한 **poststart hook**(`gpu-cr.io/restore=true` 매칭)이:
+**main 브랜치(CRIUgpu)**: GPU **제어상태**(CUDA 컨텍스트/스트림)는 별도 단계가 아니라
+CRIU 복원 중에 NVIDIA **cuda_plugin**이 인라인으로 복원한다. 즉 `crun restore` 하나가
+CPU 프로세스 + GPU 제어상태를 함께 되살린다 — 호스트 `cuda-checkpoint` 단계·
+`gpu-cr-cuda-helper.service`는 이 경로에서 **필요 없다**. 남는 것은 GCR **데이터** 경로뿐:
 
-1. **(5) 제어상태 복원** — `cuda-checkpoint --action restore`를 host helper
-   (`gpu-cr-cuda-helper.service`)에 위임(in-container 실행은 glibc ABI로 stack-smash).
-2. **(6) 데이터버퍼 remap** — in-Pod 인터셉터에 `GCR_RESTORE(2)` 신호를 control 채널로 전송.
-   **CRIU가 원본 env를 복원**하므로 인터셉터는 원본 `GCR_POD_UID` 경로를 watch →
-   `gpu-cr.io/source-pod-uid`로 그 키에 신호.
+1. **(데이터 remap)** — in-Pod 인터셉터에 `GCR_RESTORE(2)` 신호를 control 채널로 전송하면
+   인터셉터가 physical을 재생성하고 **동일 VA**에 매핑 후 H2D 복사한다. **CRIU가 원본 env를
+   복원**하므로 인터셉터는 원본 `GCR_POD_UID` 경로를 watch → `gpu-cr.io/source-pod-uid`로
+   그 키에 신호한다.
+2. **누가 신호하나** — crun은 CRIU 복원 경로에서 poststart hook을 실행하지 않으므로, 호스트
+   **restore-agent** 데몬이 `gpu-cr.io/restore=true` 컨테이너를 감지해 remap을 구동한다
+   (poststart를 지키는 런타임에서는 hook도 동일 동작). 제어상태가 이미 살아있어(cuda-checkpoint
+   "checkpointed" 상태가 없음) 감지는 상태값 대신 annotation으로 한다.
 
-## GPU 상태 복원의 race 조율 (RESTORE GATE)
+> **v1.0 브랜치**는 제어상태를 호스트 `cuda-checkpoint` 헬퍼로 복원하는 방식이다.
 
-cuda-checkpoint로 제어상태를 복원하면 프로세스가 `locked`가 되고, `unlock`하면 앱 스레드가
-재개된다. 문제는 **인터셉터의 데이터 remap(같은 VA에 physical 재생성 + H2D)이 끝나기 전에
-앱이 커널을 실행하면** 매핑되지 않은 VA를 읽어 `CUDA_ERROR_INVALID_ARGUMENT`로 죽는다는 것.
+## 외부 데이터 blob (GPU 메모리 데이터는 tar 밖에 있다)
 
-해결: 체크포인트 시스템의 인터셉터에 **RESTORE GATE**를 추가했다(커널 런치 후킹 →
-remap 중엔 앱 대기). 오케스트레이션은 race-free 순서로 조율한다:
+체크포인트 인터셉터는 GCR 방식으로 GPU 메모리 데이터를 **CRIU tar에 넣지 않는다.** freeze 때
+D2H로 외부 파일 `${GCR_DATA_DIR}/<uid>/data.blob`(기본 `/var/lib/gcr-data`, MAP_SHARED)로
+내린 뒤 munmap/close하므로, CRIU는 그 매핑을 external file로만 기록하고 내용은 tar에서 제외한다.
+그 결과 저장물은 **`.tar`(CPU + GPU 제어상태) + `.blob`(GPU 데이터)** 두 조각이며, 체크포인트
+에이전트가 둘을 같은 basename으로 나란히 저장한다(`...-<ts>.tar`, `...-<ts>.blob`).
 
-1. `cuda-checkpoint --action restore --pid P` → 제어상태 복원, `locked`
-2. 인터셉터에 `GCR_RESTORE(2)` → 인터셉터가 gate를 올리고 `GCR_GATING(3)` 기록 후 remap 진입(락에 블록)
-3. control == `GCR_GATING(3)` 대기 → gate 확인
-4. `cuda-checkpoint --action unlock --pid P` → 앱 재개(단 커널 런치는 gate로 대기), remap 진행
-5. control == `GCR_IDLE(0)` 대기 → remap 완료, gate 해제, 앱 정상 실행
+복원에서 함의는 분명하다: 인터셉터의 `restore_remap()`은 복원 직후 `data.blob`을 **다시 열어**
+H2D로 같은 VA에 복사한다. 따라서 복원 노드에 이 blob이 인터셉터가 여는 경로
+(`${GCR_DATA_DIR}/<source-uid>/data.blob`)에 **미리 존재해야** 한다.
 
-`hooks/lib/gpu-restore.sh`가 이 순서를 구현한다. 소스 재개(체크포인트 측)는 `GCR_IDLE`만
-기다리므로 하위호환된다.
+- **같은 노드**: 소스 freeze가 이미 그 경로에 blob을 남겨 두었다(그래도 CRI-O가 저장물의 `.blob`을
+  다시 스테이징해 authoritative 사본으로 덮는다).
+- **다른 노드**: blob이 target에 없다. CRI-O staging이 tar와 함께 `.blob`을 받아
+  `/var/lib/gcr-data/<source-uid>/data.blob`에 놓는다. HTTP로 서빙할 때 `.tar`와 `.blob`이 같은
+  디렉터리에 있으므로 `.tar`→`.blob` 유도만으로 충분하다.
+
+blob이 없으면 remap이 데이터를 복사하지 못한다(제어상태·프로세스는 살아도 GPU 데이터가 빈다).
+그래서 restore-agent는 remap 신호 전에 blob 존재를 확인해 경고를 남긴다.
+
+## GPU 데이터 remap의 race 조율 (RESTORE GATE @ freeze)
+
+문제는 그대로다: **인터셉터의 데이터 remap(같은 VA에 physical 재생성 + H2D)이 끝나기 전에
+앱이 커널을 실행하면** 매핑되지 않은 VA를 읽어 `CUDA_ERROR_INVALID_ARGUMENT`로 죽는다.
+
+v1.0에서는 `cuda-checkpoint`의 `locked` 상태가 앱을 잡아 주는 동안 gate를 올리고 unlock했다.
+**CRIUgpu에는 그 lock이 없다** — cuda_plugin이 제어상태를 복원하면 프로세스가 곧바로 *running*이
+되어 remap 전에 커널을 던질 수 있다. 그래서 gate를 거는 시점을 복원이 아니라 **체크포인트 freeze
+시점**으로 옮겼다:
+
+1. 체크포인트 **freeze** 시 인터셉터가 데이터 physical을 해제하기 직전에 gate를 올린다(`g_gate=1`).
+2. CRIU 덤프가 이 gate 상태(=1)를 **프로세스 메모리째로 캡처**한다.
+3. 복원된 프로세스는 gate=1로 떠오른다 → 첫 커널 런치에서 **자동으로 대기**한다.
+4. restore-agent가 `GCR_RESTORE(2)` 신호 → 인터셉터가 remap 후 gate 해제(`g_gate=0`) + `GCR_IDLE(0)`.
+5. 대기하던 커널 런치가 unblock → 앱 정상 실행.
+
+즉 앱을 잡아 두는 역할이 외부 lock(cuda-checkpoint)에서 **인터셉터 스스로 캡처된 gate**로 바뀌었다.
+덤으로 **소스 측**도 안전해진다: freeze~remap 사이에 소스 앱이 이미 해제된 데이터를 만지지 못한다.
+`hooks/lib/gpu-restore.sh`(및 restore-agent)는 이제 remap 신호를 보내고 `GCR_IDLE`만 기다리면 된다.
+
+> 인터셉터 gate-at-freeze는 체크포인트 저장소(interceptor)의 변경이며, CRIUgpu 복원을
+> race-free로 만들기 위한 짝 변경이다.
 
 ## 왜 이 순서가 안전한가
 
-체크포인트는 **CUDA suspended 상태**에서 떠졌으므로, CRIU 복원 직후 프로세스의 다음 CUDA
-호출은 제어상태가 복원될 때까지 **block**된다. 이 window에서 (5)→(6)을 끝내면 (7) 앱이 유효한
-device 포인터로 unblock된다. **VA는 한 번도 해제되지 않았으므로** 같은 주소 remap이 성립한다.
+gate가 **freeze 시점에 캡처**되므로, CRIU 복원 직후 프로세스는 제어상태가 살아 있어 바로
+running이지만 **첫 GPU 커널 런치에서 gate에 걸려 대기**한다. 이 window에서 데이터 remap을
+끝내면 앱이 유효한 device 포인터로 unblock된다. **VA는 한 번도 해제되지 않았으므로** 같은
+주소 remap이 성립한다.
 
 ## 전체 흐름 (8단계)
 
@@ -106,13 +142,13 @@ device 포인터로 unblock된다. **VA는 한 번도 해제되지 않았으므�
 |---|---|---|
 | 1 | 사용자 | Restore Pod yaml apply (image = 체크포인트 아카이브 경로) |
 | 2 | 스케줄러 | target 노드 선택 (실험: `nodeSelector`) |
-| **2.5** | **Custom CRI-O (patch)** | `checkpoint-uri`의 tar를 노드로 staging + image 경로 치환 |
+| **2.5** | **Custom CRI-O (patch)** | `.tar`(→image 경로 치환) + 형제 `.blob`(→`/var/lib/gcr-data/<uid>/data.blob`) staging |
 | 2.6 | device plugin | `nvidia.com/gpu` 할당 / `/dev/nvidia*` |
 | 3 | kubelet → CRI-O | 로컬 아카이브 감지 → 네이티브 복원 분기 |
-| 4 | CRI-O/CRIU | 컨테이너 + CPU 프로세스 복원 |
-| 5 | poststart hook → host helper | GPU 제어상태 복원 |
-| 6 | poststart hook → interceptor | GPU 데이터버퍼 remap (동일 VA + H2D) |
-| 7 | 복원된 프로세스 | workload resume |
+| 4 | CRI-O/CRIU + cuda_plugin | 컨테이너 + CPU 프로세스 + **GPU 제어상태** 복원 (CRIUgpu) |
+| 5 | restore-agent | 복원된 컨테이너(`gpu-cr.io/restore=true`) 감지 |
+| 6 | restore-agent → interceptor | `.blob` 재오픈 → GPU 데이터버퍼 remap (동일 VA + H2D) |
+| 7 | 복원된 프로세스 | gate에 대기하던 커널 런치 unblock → workload resume |
 | 8 | CRI-O/kubelet | 정상 Running 컨테이너로 등록 |
 
 ## kubelet 이미지 이름 제약 (중요)
@@ -149,14 +185,21 @@ bind mount로 주입한 상태로 체크포인트된다. CRI-O 복원 검증(`se
 ## 가능성 판단 / 미검증 지점 (정직하게)
 
 1. **컴파일 미검증**: 이 환경엔 Go 툴체인이 없어 `gpu_cr_restore.go`와 patch는 **빌드/실측
-   미검증**이다. `hack/build-crio.sh`로 cri-o v1.35.0에 적용해 빌드해야 한다. patch의 clean
+   미검증**이다. `hack/build-crio.sh`로 노드와 동일한 cri-o(예: v1.33.13)에 적용해 빌드해야 한다. patch의 clean
    apply만 확인됨.
-2. **CRI-O 버전**: patch는 v1.35.0 기준. 다른 버전이면 `CreateContainer` 앵커를 rebase.
+2. **CRI-O 버전**: patch는 **v1.33.x 기준**(빌드 기본값 v1.33.13). container_restore.go가 `createConfig.Linux`를 쓰는 1.33 계열에 맞음 — v1.35처럼 `GetLinux()`인 버전이면 0004 앵커를 rebase해야 한다.
 3. **source-pod-uid 의존**: 데이터 remap이 원본 UID 키에 의존. 체크포인트 tar에 원본 UID를
    메타로 저장하면 annotation 없이 자동화 가능(후속).
 4. **이미지/rootfs 호환성**, **device plugin 선행**: CRIU 복원 시점에 GPU 디바이스 접근이
    준비돼 있어야 함.
 5. **단일 컨테이너/단일 GPU** 기준. 멀티프로세스(NCCL)·멀티GPU는 후속.
+6. **TCP 소켓 제약 (실측)**: CRI-O→conmon→`crun restore` 경로는 복원 시 CRIU에 `tcp-close`를
+   전달하지 못한다(`default.conf`는 RPC에 덮이고, `crun.conf`/`org.criu.config`도 이 경로에선
+   CRIU로 포워딩 안 됨). 따라서 **체크포인트 시점에 established TCP가 있으면**
+   `image.c:94: Need to set the --tcp-close options`로 복원이 실패한다. 현재 확실한 해법은
+   워크로드를 오프라인으로 만들고 소스 `default.conf`에서 tcp-close를 빼 **소켓 없는 깨끗한
+   체크포인트**를 뜨는 것(§SETUP.ko.md 7). `install-node.sh`의 `/etc/criu/crun.conf` +
+   0004의 `org.criu.config` 주입은 crun이 포워딩을 지원하는 환경을 위한 대비책이다.
 
 ## 검증 전략
 

@@ -1,0 +1,61 @@
+# PLAIN cold-start baseline workload (NO GCR interceptor) — the "just deploy it" path.
+# Used by benchmark/cold-start.sh: it swaps metadata.name + the MODEL env per model,
+# deploys, and waits for the READY line (model loaded + warmed up on the GPU).
+#
+# This is deliberately the traditional method: no LD_PRELOAD, no GCR_* env, no gpu-cr
+# mounts — so the cold-start number is a clean "no C/R" baseline to compare the GCR
+# restore time against. Model is loaded OFFLINE from /models (same files as the
+# checkpoint used), so no HF download skews it.
+#
+# Prereq: /mnt/nfs/models/<model> exists on the node, and the image is pre-pulled.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cold-workload
+  namespace: default
+spec:
+  nodeSelector: { nvidia.com/gpu.present: "true" }
+  restartPolicy: Never
+  containers:
+    - name: cuda-app
+      image: pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
+      env:
+        - { name: MODEL, value: "/models/opt-1.3b" }   # cold-start.sh overrides this
+        - { name: HF_HOME, value: /root/.cache/huggingface }
+        - { name: HF_HUB_DISABLE_XET, value: "1" }
+        - { name: HF_HUB_OFFLINE, value: "1" }
+        - { name: TRANSFORMERS_OFFLINE, value: "1" }
+      command: ["bash","-lc"]
+      args:
+        - |
+          set -e
+          pip -q install "transformers>=4.44" accelerate sentencepiece >/dev/null 2>&1 || true
+          python - <<'PY'
+          import os, time, torch
+          from transformers import AutoModelForCausalLM, AutoTokenizer
+          req = os.environ.get("MODEL", "/models/opt-1.3b")
+          # resolve the on-disk model dir: some models live under /models/facebook/<name>
+          base = os.path.basename(req.rstrip("/"))
+          cands = [req, req.replace("/models/","/models/facebook/"),
+                   "/models/%s"%base, "/models/facebook/%s"%base]
+          m = next((c for c in cands if os.path.isdir(c) and os.path.exists(os.path.join(c,"config.json"))), None)
+          if not m:
+              raise SystemExit("MODEL dir not found; tried: %s" % cands)
+          print("using model dir: %s" % m, flush=True)
+          tok = AutoTokenizer.from_pretrained(m)
+          model = AutoModelForCausalLM.from_pretrained(m, torch_dtype=torch.float16).cuda().eval()
+          ids = tok("Hello, world. Tell me about GPUs.", return_tensors="pt").input_ids.cuda()
+          with torch.no_grad():
+              for _ in range(3):
+                  model.generate(ids, max_new_tokens=32)   # warmup
+          torch.cuda.synchronize()
+          print("READY framework=pytorch model=%s gpu_alloc=%.0fMiB" % (m, torch.cuda.memory_allocated()/2**20), flush=True)
+          while True:
+              time.sleep(3600)
+          PY
+      resources: { limits: { nvidia.com/gpu: "1" } }
+      volumeMounts:
+        - { name: model, mountPath: /models, readOnly: true }
+  volumes:
+    - name: model
+      hostPath: { path: /mnt/nfs/models, type: Directory }

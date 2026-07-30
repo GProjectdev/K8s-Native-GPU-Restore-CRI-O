@@ -32,6 +32,8 @@ spec:
           mountPath: /var/lib/gpu-cr/run
         - name: gcr-checkpoint
           mountPath: /var/lib/gcr-checkpoint
+        - name: gcr-data
+          mountPath: /var/lib/gcr-data
   volumes:
     - name: gpu-cr-lib
       hostPath: { path: /var/lib/gpu-cr/lib, type: Directory }
@@ -39,3 +41,5 @@ spec:
       hostPath: { path: /var/lib/gpu-cr/run, type: DirectoryOrCreate }
     - name: gcr-checkpoint
       hostPath: { path: /var/lib/gcr-checkpoint, type: DirectoryOrCreate }
+    - name: gcr-data
+      hostPath: { path: /var/lib/gcr-data, type: DirectoryOrCreate }

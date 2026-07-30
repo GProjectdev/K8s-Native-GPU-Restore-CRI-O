@@ -1,7 +1,7 @@
 # Experiment Guide — GPU Restore (Custom CRI-O)
 
 English summary of `docs/SETUP.ko.md`. Restores a `Checkpoint.tar` into a new Pod
-via a patched CRI-O (v1.35.0) native restore path. Target: K8s v1.33+, driver 570+.
+via a patched CRI-O native restore path (patch targets CRI-O v1.33.x; build the version your node runs). Target: K8s v1.33+, driver 570+, crun >= 1.9.
 
 ## 1. Build the Custom CRI-O (once)
 ```bash
@@ -26,8 +26,9 @@ nodeSelector), then `kubectl apply -f` it.
 sudo journalctl -u crio | grep gpu-cr | tail
 kubectl logs restore-cuda-l1 | tail -5   # checksum ... OK
 ```
-Expect: `gpu-cr: staged checkpoint`, native CRIU restore, then the poststart hook
-`host helper restore ok` + `interceptor remap ack`, and a matching checksum.
+Expect: `gpu-cr: staged checkpoint`, native CRIU restore (cuda_plugin restores the
+GPU control state — CRIUgpu), then the restore-agent `remapping GPU data ...` /
+`container ... restored`, and a matching checksum.
 
 A fork-free runtime-shim alternative lives in `alt-shim/` (less robust). See
 `docs/DESIGN.ko.md` for the approach comparison and honest unverified points.

@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # gpu-cr-restore-hook — OCI poststart hook. CRI-O runs it after the container
-# process is (re)started. For a restored GPU container it performs steps 5/6/7:
-#   5  GPU control state restore  (cuda-checkpoint --restore, via host helper)
-#   6  GPU data-buffer remap      (interceptor: same VA + H2D)
-#   7  the app's CUDA calls unblock
+# process is (re)started. Under CRIUgpu the GPU control state is already restored
+# by CRIU + cuda_plugin, so this hook only drives the remaining GCR DATA path:
+#   - GPU data-buffer remap  (interceptor: recreate physical + same VA + H2D)
+#   - the app's gated CUDA kernel launches unblock
+# NOTE: crun does NOT run poststart hooks on the CRIU restore path, so on crun
+# nodes the restore-agent daemon drives this instead; this hook covers runtimes
+# that DO honor poststart on restore.
 #
 # The OCI runtime delivers the container STATE as JSON on stdin:
 #   { "id": "...", "pid": 1234, "bundle": "/path", "annotations": {...} }

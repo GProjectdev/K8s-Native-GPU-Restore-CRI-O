@@ -23,9 +23,10 @@ CRI-O 재빌드가 어려운 환경을 위한 shim 대안은 [`alt-shim/`](alt-s
 crio-patch/server/gpu_cr_restore.go            # stageGPUCheckpoint(): checkpoint-uri를
                                                 # 노드로 staging, image를 로컬 tar로 치환
 crio-patch/0001-create-stage-gpu-checkpoint.patch  # CreateContainer에 호출 1줄
-                                                # (cri-o v1.35.0에 clean apply 확인)
-oci-hooks/ + hooks/                             # poststart hook: GPU 제어상태 복원
-                                                # + 데이터버퍼 remap
+                                                # (cri-o v1.33.x 대상; 빌드 기본값 v1.33.13)
+oci-hooks/ + hooks/                             # poststart hook + restore-agent:
+                                                # GPU 데이터버퍼 remap (제어상태는
+                                                # CRIUgpu로 복귀)
 ```
 
 ## 복원 흐름
@@ -33,12 +34,14 @@ oci-hooks/ + hooks/                             # poststart hook: GPU 제어상�
 ```
 1  Restore Pod yaml apply  (image = 체크포인트 아카이브 경로)
 2  스케줄러가 노드 선택      (실험: nodeSelector)
-2.5 Custom CRI-O가 checkpoint-uri의 tar를 노드로 STAGING
+2.5 Custom CRI-O가 두 파일을 노드로 STAGING
+      - 체크포인트 .tar (CPU + GPU 제어상태)     -> 컨테이너 이미지
+      - 형제 .blob (GPU 메모리 데이터)           -> /var/lib/gcr-data/<uid>/data.blob
 3  kubelet -> CRI-O 로컬 아카이브 감지
-4  CRIU 복원               (컨테이너 + CPU 프로세스)
-5  poststart hook: GPU 제어상태  (cuda-checkpoint --restore via host helper)
-6  poststart hook: GPU 데이터버퍼 (인터셉터 동일 VA remap + H2D)
-7  workload resume
+4  CRIU 복원 + cuda_plugin   (컨테이너 + CPU 프로세스 + GPU 제어상태 — CRIUgpu)
+5  restore-agent가 복원된 컨테이너 감지 (gpu-cr.io/restore=true)
+6  데이터 remap: 인터셉터가 .blob 재오픈 후 physical 재생성 + 동일 VA + H2D
+7  gate에 대기하던 커널 런치 unblock -> workload resume
 8  CRI-O/kubelet이 정상 Running 컨테이너로 등록
 ```
 
@@ -58,6 +61,22 @@ kubectl apply -f deploy/sample-restore-pod-l1.yaml   # placeholder 채운 뒤
 실험용, 단일 컨테이너·단일 GPU. **cri-o v1.33.13(K8s v1.33, NVIDIA 570.211.01, A100)에서
 end-to-end 검증 완료:** 같은 노드 복원과 노드 간 마이그레이션(worker-1 → worker-2, HTTP로
 체크포인트 pull) 모두 워크로드가 재개되고 GPU 체크섬이 비트 단위로 일치하며, restore-agent로
-`kubectl apply`만으로 완전 자동 동작. 패치(0001–0004)는 cri-o v1.35.0·v1.33.13에 clean apply.
+`kubectl apply`만으로 완전 자동 동작. 패치(0001–0004)는 cri-o **v1.33.x** 기준(빌드 기본값 v1.33.13, worker에서 end-to-end 검증). 다른 마이너 버전이면 앵커 rebase 필요.
 전제·남은 지점은 [docs/DESIGN.ko.md](docs/DESIGN.ko.md), 노드 간 절차는
 [docs/MIGRATION.ko.md](docs/MIGRATION.ko.md).
+
+## 함정 (실측으로 배운 것)
+
+- **노드가 도는 CRI-O 버전으로 빌드**하라(`crio --version` → `CRIO_VERSION=v1.33.x`). 패치 앵커는
+  1.33 계열 기준이라 다른 버전은 rebase가 필요할 수 있다.
+- 모든 노드에 **crun ≥ 1.9**.
+- **소켓 없는 깨끗한 체크포인트.** 체크포인트 시점에 TCP 소켓을 물고 있으면
+  (`CRIU -52 / Need to set the --tcp-close options`) 복원이 실패한다 — CRI-O/crun이 복원 시
+  `tcp-close`를 안 넘기기 때문. 워크로드를 오프라인으로(예: 모델을 로컬 경로에서 로드,
+  `HF_HUB_OFFLINE=1`) 만들고 소스 노드 `/etc/criu/default.conf`에서 `tcp-close`를 제거하라.
+  자세히는 docs/SETUP.ko.md §7.
+- **모델 파일**은 소스·복원 노드에 **동일 경로로 마운트**된 위치에서 로드하라.
+
+## 복원 시간 측정
+
+복원 소요 시간을 단계별(stage/criu/cuda_plugin/remap/total)로 측정하고 **gcr vs baseline(순수 CRIUgpu)** 을 비교하는 벤치마크는 [`benchmark/`](benchmark/) 참고 (체크포인트 repo의 `benchmark/run.sh`에 대응).

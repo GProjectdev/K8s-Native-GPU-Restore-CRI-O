@@ -17,7 +17,7 @@ kubelet --version       # K8s 마이너와 CRI-O 마이너는 보통 일치(1.33
 ```
 
 체크포인트 시스템은 **K8s v1.33 + CRI-O v1.33**에서 검증됐으므로, 그 노드라면
-`CRIO_VERSION=v1.33.x`로 빌드한다(패치 기본값 v1.35.0이 아님).
+`CRIO_VERSION=v1.33.x`로 빌드한다(패치 기본값은 v1.33.13이며, 노드 버전에 정확히 맞춰라).
 
 ---
 
@@ -126,8 +126,8 @@ kubectl get pod restore-cuda-l1 -w
 
 ```bash
 sudo journalctl -u crio | grep -E 'gpu-cr|checkpoint archive' | tail
-# 기대: "gpu-cr: staged checkpoint ..." -> 네이티브 복원 -> hook: "host helper restore ok",
-#       "interceptor remap ack"
+# 기대: "gpu-cr: staged checkpoint ..." -> 네이티브 복원(cuda_plugin이 제어상태 복원) ->
+#       restore-agent: "remapping GPU data ...", "container ... restored"
 kubectl logs restore-cuda-l1 | tail -5         # checksum ... OK
 ```
 

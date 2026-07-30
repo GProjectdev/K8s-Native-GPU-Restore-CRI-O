@@ -10,7 +10,7 @@ compatibility breaks.
 crio --version        # e.g. 1.33.4  -> CRIO_VERSION=v1.33.4
 ```
 The checkpoint system is verified on K8s/CRI-O v1.33, so build with
-`CRIO_VERSION=v1.33.x` (not the patch's v1.35.0 default).
+`CRIO_VERSION=v1.33.x` (patch default is v1.33.13; match your node exactly).
 
 ## B. Existing CRI-O node (typical)
 
@@ -50,7 +50,8 @@ kubectl get nodes
 ## Restore
 Fill `deploy/sample-restore-pod-l1.yaml` (source-pod-uid, checkpoint-uri, image,
 nodeSelector) and `kubectl apply -f`. Expect crio logs `gpu-cr: staged checkpoint`,
-native restore, then hook `host helper restore ok` + `interceptor remap ack`.
+native restore (cuda_plugin restores GPU control state — CRIUgpu), then restore-agent
+`remapping GPU data ...` / `container ... restored`.
 
 ## Rollback
 ```bash

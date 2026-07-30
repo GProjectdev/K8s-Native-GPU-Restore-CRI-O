@@ -14,11 +14,15 @@ package server
 // brought here. stageGPUCheckpoint does exactly that, driven by Pod annotations:
 //
 //	gpu-cr.io/restore: "true"
-//	gpu-cr.io/checkpoint-uri: "<scheme>://<location>/<path>"
+//	gpu-cr.io/checkpoint-uri: "<scheme>://<location>/<path>.tar"
+//	gpu-cr.io/data-uri: "<...>.blob"   (optional; default: checkpoint-uri .tar->.blob)
 //
-// It fetches the referenced archive onto the node and rewrites the container's
-// image to the local staged path, so CRI-O's existing checkpoint detection and
-// CRIU restore pick it up unchanged.
+// It fetches TWO artifacts: the checkpoint tar (CPU + GPU control state), which it
+// points the container image at, and the external GPU data blob (the interceptor
+// keeps GPU memory data out of the CRIU tar), which it places at
+// <GCR_DATA_DIR>/<source-uid>/data.blob for the restored interceptor to re-map
+// (H2D). CRI-O's existing checkpoint detection and CRIU restore pick up the tar
+// unchanged.
 //
 // NOTE (kubelet path): kubelet validates the Pod's container image as an OCI
 // reference BEFORE CRI-O is called, so a filesystem path in .image is rejected
@@ -52,7 +56,10 @@ const (
 	gpuCRRestoreAnnotation = "gpu-cr.io/restore"
 	gpuCRURIAnnotation     = "gpu-cr.io/checkpoint-uri"
 	gpuCRSrcUIDAnnotation  = "gpu-cr.io/source-pod-uid"
+	gpuCRDataURIAnnotation = "gpu-cr.io/data-uri"
+	gpuCRDataDirAnnotation = "gpu-cr.io/data-dir"
 	gpuCRStageDir          = "/var/lib/gpu-cr/restore"
+	gpuCRDefaultDataDir    = "/var/lib/gcr-data"
 )
 
 // stageGPUCheckpoint makes the checkpoint referenced by gpu-cr.io/checkpoint-uri
@@ -102,17 +109,62 @@ func (s *Server) stageGPUCheckpoint(ctx context.Context, sbAnnotations map[strin
 			gpuCRURIAnnotation, cfg.GetImage().GetImage())
 	}
 
+	// GCR data blob: the in-Pod interceptor keeps the GPU *memory data* OUT of the
+	// CRIU tar, in an external <GCR_DATA_DIR>/<uid>/data.blob that it re-maps (H2D)
+	// at restore. Stage that blob to the exact host path the restored interceptor
+	// will re-open, so a cross-node restore actually has the GPU data present. The
+	// checkpoint agent stores the blob next to the tar with the same basename, so by
+	// default we derive the blob URI from the checkpoint-uri (".tar" -> ".blob");
+	// gpu-cr.io/data-uri overrides it, gpu-cr.io/data-dir overrides the target dir.
+	srcUID := strings.TrimSpace(ann[gpuCRSrcUIDAnnotation])
+	dataDir := strings.TrimSpace(ann[gpuCRDataDirAnnotation])
+	if dataDir == "" {
+		dataDir = gpuCRDefaultDataDir
+	}
+	blobURI, blobExplicit := strings.TrimSpace(ann[gpuCRDataURIAnnotation]), true
+	if blobURI == "" {
+		blobURI, blobExplicit = deriveBlobURI(uri), false
+	}
+	if blobURI != "" {
+		switch {
+		case srcUID == "":
+			log.Warnf(ctx, "gpu-cr: have GPU data blob %q but no %s; cannot tell the interceptor where to read it", blobURI, gpuCRSrcUIDAnnotation)
+		default:
+			blobDst := filepath.Join(dataDir, srcUID, "data.blob")
+			if err := stageCheckpointURI(ctx, blobURI, blobDst); err != nil {
+				if blobExplicit {
+					return fmt.Errorf("stage GPU data blob %q: %w", blobURI, err)
+				}
+				log.Warnf(ctx, "gpu-cr: GPU data blob %q not staged (%v); using existing %s if present (same-node). A cross-node restore of a blob-based checkpoint will fail to remap without it — set %s if the blob is served elsewhere", blobURI, err, blobDst, gpuCRDataURIAnnotation)
+			} else {
+				log.Infof(ctx, "gpu-cr: staged GPU data blob %q -> %s", blobURI, blobDst)
+			}
+		}
+	}
+
 	// Propagate the gpu-cr annotations onto the CONTAINER config so they land in
 	// the container's OCI spec, where the gpu-cr-restore poststart hook matches.
 	if cfg.Annotations == nil {
 		cfg.Annotations = map[string]string{}
 	}
-	for _, k := range []string{gpuCRRestoreAnnotation, gpuCRURIAnnotation, gpuCRSrcUIDAnnotation} {
+	for _, k := range []string{gpuCRRestoreAnnotation, gpuCRURIAnnotation, gpuCRSrcUIDAnnotation, gpuCRDataURIAnnotation, gpuCRDataDirAnnotation} {
 		if v := ann[k]; v != "" {
 			cfg.Annotations[k] = v
 		}
 	}
 	return nil
+}
+
+// deriveBlobURI maps ".../<name>.tar" to ".../<name>.blob". The checkpoint agent
+// stores the external GPU data blob next to the tar with the same basename, so the
+// blob is reachable at the same location/scheme as the checkpoint-uri. Returns ""
+// if the URI is not a .tar (then an explicit gpu-cr.io/data-uri is required).
+func deriveBlobURI(tarURI string) string {
+	tarURI = strings.TrimSpace(tarURI)
+	if strings.HasSuffix(tarURI, ".tar") {
+		return strings.TrimSuffix(tarURI, ".tar") + ".blob"
+	}
+	return ""
 }
 
 // stageCheckpointURI copies/downloads the checkpoint archive at uri to dst.

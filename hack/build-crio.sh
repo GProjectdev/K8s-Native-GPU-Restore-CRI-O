@@ -46,7 +46,7 @@ preflight
 # Detect it on a node with:  crio --version   (e.g. "1.33.13" -> CRIO_VERSION=v1.33.13)
 # The patch was authored against v1.35.0; the script fails loudly if it does not
 # apply to your version (rebase the one-line anchor then).
-CRIO_VERSION="${CRIO_VERSION:-v1.35.0}"
+CRIO_VERSION="${CRIO_VERSION:-v1.33.13}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="${SRC_DIR:-/tmp/cri-o-gpu-cr}"
 
