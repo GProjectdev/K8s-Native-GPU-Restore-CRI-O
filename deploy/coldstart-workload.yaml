@@ -33,7 +33,15 @@ spec:
           python - <<'PY'
           import os, time, torch
           from transformers import AutoModelForCausalLM, AutoTokenizer
-          m = os.environ.get("MODEL", "/models/opt-1.3b")
+          req = os.environ.get("MODEL", "/models/opt-1.3b")
+          # resolve the on-disk model dir: some models live under /models/facebook/<name>
+          base = os.path.basename(req.rstrip("/"))
+          cands = [req, req.replace("/models/","/models/facebook/"),
+                   "/models/%s"%base, "/models/facebook/%s"%base]
+          m = next((c for c in cands if os.path.isdir(c) and os.path.exists(os.path.join(c,"config.json"))), None)
+          if not m:
+              raise SystemExit("MODEL dir not found; tried: %s" % cands)
+          print("using model dir: %s" % m, flush=True)
           tok = AutoTokenizer.from_pretrained(m)
           model = AutoModelForCausalLM.from_pretrained(m, torch_dtype=torch.float16).cuda().eval()
           ids = tok("Hello, world. Tell me about GPUs.", return_tensors="pt").input_ids.cuda()
