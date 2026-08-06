@@ -115,6 +115,8 @@ kubectl get pod <원본-pod> -o jsonpath='{.metadata.uid}'
 # 2) deploy/sample-restore-pod-l1.yaml 채우기:
 #    - gpu-cr.io/source-pod-uid: 위 UID
 #    - gpu-cr.io/checkpoint-uri: tar 위치 (같은노드 hostpath:// / 타노드 nfs:// https://)
+#    - gpu-cr.io/data-uri: (선택) blob 위치 override (기본 tar .tar->.blob)
+#    - gpu-cr.io/blob-mode: (선택) "direct"면 blob을 NFS에서 직접 읽음(로컬 복사 X; Pod가 /mnt/nfs 마운트 필요)
 #    - image: staging될 노드 로컬 경로 (예: /var/lib/gpu-cr/restore/cuda-app-Checkpoint.tar)
 #    - nodeSelector: 대상 노드 hostname
 

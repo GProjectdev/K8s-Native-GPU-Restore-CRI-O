@@ -56,6 +56,8 @@ metadata:
     gpu-cr.io/restore: "true"
     gpu-cr.io/checkpoint-uri: "hostpath:///var/lib/gcr-checkpoint/Checkpoint.tar"
     gpu-cr.io/source-pod-uid: "<original pod uid>"
+    gpu-cr.io/data-uri: "<...>.blob"          # optional; default: checkpoint-uri .tar->.blob
+    gpu-cr.io/blob-mode: "direct"             # optional; read the GPU blob from NFS (no local copy)
 spec:
   nodeSelector: { kubernetes.io/hostname: gpu-node-2 }
   containers:
@@ -63,6 +65,38 @@ spec:
       image: /var/lib/gpu-cr/restore/vllm-Checkpoint.tar   # staged local archive
       resources: { limits: { nvidia.com/gpu: 1 } }
 ```
+
+## Restore annotations
+
+| annotation | meaning |
+|---|---|
+| `gpu-cr.io/restore` | `"true"` marks a restore Pod. |
+| `gpu-cr.io/checkpoint-uri` | checkpoint tar location (`hostpath://`, `nfs://`, `http(s)://`). |
+| `gpu-cr.io/source-pod-uid` | original Pod UID — keys the GPU data blob. |
+| `gpu-cr.io/data-uri` | optional GPU blob override (default: tar `.tar`->`.blob`). |
+| `gpu-cr.io/blob-mode` | `copy` (default) or `direct` — see below. |
+
+## Direct blob mode (skip the local copy)
+
+`gpu-cr.io/blob-mode: direct` makes CRI-O **symlink** the GPU data blob to its node-local
+(NFS-mounted) path instead of copying it, so the interceptor streams the GPU data straight
+from NFS at remap. This removes the local-disk write that dominates staging for large
+models. The restore Pod must mount that storage (e.g. hostPath `/mnt/nfs`); it falls back
+to copy if the blob is not reachable node-locally. Details: [`benchmark/README.md`](benchmark/README.md).
+
+## Control plane — CR-driven restore (`orchestrator/`)
+
+Beyond per-Pod annotation restore, [`orchestrator/`](orchestrator/) adds a higher-level,
+CR-driven control plane: **WorkloadRestore** (restore a whole Deployment/StatefulSet) ->
+**GPURestore** (one per replica) + a **mutating webhook** that injects the `gpu-cr.io/*`
+annotations above into newly created Pods. Symmetric to the checkpoint side's
+`WorkloadCheckpoint -> GPUCheckpoint`. See [`orchestrator/README.md`](orchestrator/README.md).
+
+## Branches
+
+- `main` — CRIUgpu control + GCR interceptor blob (+ direct mode, + orchestrator).
+- `v2.1` — same as `main` **without** the orchestrator (pre CR-control-plane).
+- `v2.0`, `v1.0` — `v1.0` = GCR-only (host `cuda-checkpoint`) control; see its README banner.
 
 ## Quick start
 

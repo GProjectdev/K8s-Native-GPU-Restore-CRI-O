@@ -56,6 +56,37 @@ kubectl apply -f deploy/sample-restore-pod-l1.yaml   # placeholder 채운 뒤
 
 전체 절차: [docs/SETUP.ko.md](docs/SETUP.ko.md).
 
+## 복원 주석(annotation)
+
+| 주석 | 의미 |
+|---|---|
+| `gpu-cr.io/restore` | `"true"`면 복원 Pod. |
+| `gpu-cr.io/checkpoint-uri` | 체크포인트 tar 위치(`hostpath://`, `nfs://`, `http(s)://`). |
+| `gpu-cr.io/source-pod-uid` | 원본 Pod UID — GPU 데이터 blob 키. |
+| `gpu-cr.io/data-uri` | (선택) blob 위치 override (기본: tar `.tar`->`.blob`). |
+| `gpu-cr.io/blob-mode` | `copy`(기본) 또는 `direct` — 아래 참고. |
+
+## Direct blob 모드 (로컬 복사 생략)
+
+`gpu-cr.io/blob-mode: direct`이면 CRI-O가 GPU 데이터 blob을 로컬로 복사하지 않고
+노드-로컬(NFS 마운트) 경로로 **심링크**만 걸어, 인터셉터가 remap 때 NFS에서 곧장 읽는다.
+대형 모델의 staging을 지배하는 로컬 디스크 쓰기가 사라진다. 복원 Pod가 그 스토리지를
+마운트해야 하며(hostPath `/mnt/nfs` 등), blob이 노드-로컬에 없으면 copy로 폴백한다.
+자세히: [`benchmark/README.md`](benchmark/README.md).
+
+## 컨트롤 플레인 — CR 기반 복원 (`orchestrator/`)
+
+Pod 주석 단위 복원 외에, [`orchestrator/`](orchestrator/)에 상위 CR 기반 컨트롤 플레인을
+추가했다: **WorkloadRestore**(Deployment 등 통째 복원) -> **GPURestore**(replica별) +
+새 Pod에 위 `gpu-cr.io/*` 주석을 주입하는 **뮤테이션 웹훅**. 체크포인트 쪽
+`WorkloadCheckpoint -> GPUCheckpoint`와 대칭. 자세히: [`orchestrator/README.md`](orchestrator/README.md).
+
+## 브랜치
+
+- `main` — CRIUgpu 제어 + GCR 인터셉터 blob (+ direct 모드, + 오퍼레이터).
+- `v2.1` — 오퍼레이터 **없는** `main`과 동일(CR 컨트롤 플레인 직전).
+- `v2.0`, `v1.0` — `v1.0`은 GCR-only(호스트 `cuda-checkpoint`) 제어; 해당 README 배너 참고.
+
 ## 상태
 
 실험용, 단일 컨테이너·단일 GPU. **cri-o v1.33.13(K8s v1.33, NVIDIA 570.211.01, A100)에서
