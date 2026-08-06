@@ -52,10 +52,15 @@ make generate manifests    # refresh deepcopy + CRD yaml (controller-gen)
 make docker-build docker-push IMG=<registry>/gpu-cr-restore-orchestrator:tag
 
 kubectl apply -f config/crd/            # CRDs
-# cert-manager required for the webhook TLS (or provide your own certs)
 kubectl apply -f deploy/orchestrator-restore.yaml
+bash deploy/gen-webhook-certs.sh        # webhook TLS WITHOUT cert-manager
 kubectl apply -f deploy/sample-workloadrestore.yaml
 ```
+
+> **Webhook TLS:** admission webhooks are called over HTTPS. `gen-webhook-certs.sh`
+> generates a self-signed CA + serving cert, creates the tls Secret the Pod mounts,
+> and patches the webhook `caBundle` — no cert-manager needed. (`failurePolicy: Ignore`
+> means Pod creation is never blocked even before certs are installed.)
 
 > This module is intentionally separate from the CRI-O patch (which is compiled
 > into cri-o). Nothing here changes the data plane; it only produces annotations.
