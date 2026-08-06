@@ -1,0 +1,19 @@
+# One replica's restore. Normally created by the WorkloadRestore controller; shown
+# here standalone. The mutating webhook injects these into a newly created Pod.
+apiVersion: gpu-cr.io/v1alpha1
+kind: GPURestore
+metadata:
+  name: gpurst-1
+  namespace: default
+  labels:
+    gpu-cr.io/workload-restore: workloadrestore-1
+spec:
+  workloadRestoreRef:
+    name: workloadrestore-1
+    namespace: default
+  checkpointInfo:
+    podUid: REPLACE_WITH_SOURCE_POD_UID
+    checkpointUri: nfs://10.178.0.14/mnt/nfs/gcr/checkpoint-<pod>_<...>.tar
+    node: jsj-worker-2
+  targetPodName: deploy-1-abcde
+  blobMode: direct

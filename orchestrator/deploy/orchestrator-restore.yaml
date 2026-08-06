@@ -1,0 +1,121 @@
+# Restore orchestrator — a single central controller+webhook Deployment. Runs
+# alongside (and independently of) the Restore Agent DaemonSet / Custom CRI-O.
+# It only CREATES GPURestore objects and injects gpu-cr.io/* annotations into new
+# Pods. Requires cert-manager for the webhook TLS (or provide certs yourself).
+# Set `image:` to your registry tag before applying.
+apiVersion: v1
+kind: Namespace
+metadata: {name: gpu-cr-system}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: gpu-cr-restore-orchestrator, namespace: gpu-cr-system}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: gpu-cr-restore-orchestrator}
+rules:
+  - apiGroups: ["gpu-cr.io"]
+    resources: ["workloadrestores", "gpurestores"]
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  - apiGroups: ["gpu-cr.io"]
+    resources: ["workloadrestores/status", "gpurestores/status"]
+    verbs: ["get","update","patch"]
+  # Read the source WorkloadCheckpoint (dynamic) + resolve Pods to their workloads.
+  - apiGroups: ["gpu-cr.io"]
+    resources: ["workloadcheckpoints"]
+    verbs: ["get","list","watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get","list","watch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets","deployments","statefulsets"]
+    verbs: ["get","list","watch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create","patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: gpu-cr-restore-orchestrator}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: gpu-cr-restore-orchestrator}
+subjects:
+  - {kind: ServiceAccount, name: gpu-cr-restore-orchestrator, namespace: gpu-cr-system}
+---
+# Self-signed webhook cert via cert-manager.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata: {name: gpu-cr-selfsigned, namespace: gpu-cr-system}
+spec: {selfSigned: {}}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: {name: gpu-cr-restore-webhook-cert, namespace: gpu-cr-system}
+spec:
+  secretName: gpu-cr-restore-webhook-cert
+  dnsNames:
+    - gpu-cr-restore-orchestrator-webhook.gpu-cr-system.svc
+    - gpu-cr-restore-orchestrator-webhook.gpu-cr-system.svc.cluster.local
+  issuerRef: {name: gpu-cr-selfsigned, kind: Issuer}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: gpu-cr-restore-orchestrator-webhook, namespace: gpu-cr-system}
+spec:
+  selector: {app.kubernetes.io/name: gpu-cr-restore-orchestrator}
+  ports:
+    - {port: 443, targetPort: 9443}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-cr-restore-orchestrator
+  namespace: gpu-cr-system
+  labels: {app.kubernetes.io/name: gpu-cr-restore-orchestrator}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app.kubernetes.io/name: gpu-cr-restore-orchestrator}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: gpu-cr-restore-orchestrator}}
+    spec:
+      serviceAccountName: gpu-cr-restore-orchestrator
+      containers:
+        - name: orchestrator
+          image: docker.io/jeongseungjun/gpu-cr-restore-orchestrator:latest
+          imagePullPolicy: Always
+          args: ["--leader-elect=true"]
+          ports:
+            - {containerPort: 9443, name: webhook}
+          volumeMounts:
+            - {name: certs, mountPath: /tmp/k8s-webhook-server/serving-certs, readOnly: true}
+          livenessProbe: {httpGet: {path: /healthz, port: 8081}, initialDelaySeconds: 15}
+          readinessProbe: {httpGet: {path: /readyz, port: 8081}, initialDelaySeconds: 5}
+      volumes:
+        - name: certs
+          secret: {secretName: gpu-cr-restore-webhook-cert}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: gpu-cr-restore-pod
+  annotations:
+    cert-manager.io/inject-ca-from: gpu-cr-system/gpu-cr-restore-webhook-cert
+webhooks:
+  - name: pod-restore.gpu-cr.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: NoneOnDryRun
+    failurePolicy: Ignore          # never block Pod creation if the webhook is down
+    clientConfig:
+      service: {name: gpu-cr-restore-orchestrator-webhook, namespace: gpu-cr-system, path: /mutate-v1-pod, port: 443}
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+        scope: Namespaced
+    namespaceSelector:
+      matchExpressions:
+        - {key: kubernetes.io/metadata.name, operator: NotIn, values: [kube-system, gpu-cr-system]}

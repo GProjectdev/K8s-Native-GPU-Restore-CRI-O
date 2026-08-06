@@ -1,0 +1,63 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: workloadrestores.gpu-cr.io
+spec:
+  group: gpu-cr.io
+  names:
+    kind: WorkloadRestore
+    listKind: WorkloadRestoreList
+    plural: workloadrestores
+    singular: workloadrestore
+    shortNames: [wrst]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - {name: Kind, type: string, jsonPath: .spec.targetWorkloadRef.kind}
+        - {name: Workload, type: string, jsonPath: .spec.targetWorkloadRef.name}
+        - {name: Phase, type: string, jsonPath: .status.phase}
+        - {name: Total, type: integer, jsonPath: .status.total}
+        - {name: Done, type: integer, jsonPath: .status.completed}
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            apiVersion: {type: string}
+            kind: {type: string}
+            metadata: {type: object}
+            spec:
+              type: object
+              required: [targetWorkloadRef]
+              properties:
+                targetWorkloadRef:
+                  type: object
+                  required: [namespace, name]
+                  properties:
+                    apiVersion: {type: string}
+                    kind: {type: string, default: Pod}
+                    namespace: {type: string}
+                    name: {type: string}
+                    container: {type: string}
+                checkpointRef:
+                  type: object
+                  required: [name]
+                  properties:
+                    name: {type: string}
+                    namespace: {type: string}
+                server: {type: string}
+                blobMode: {type: string, enum: [copy, direct]}
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+              properties:
+                phase: {type: string}
+                total: {type: integer}
+                active: {type: integer}
+                completed: {type: integer}
+                failed: {type: integer}
+                message: {type: string}

@@ -1,0 +1,19 @@
+# Restore a whole workload (Deployment) from the checkpoints recorded by a
+# WorkloadCheckpoint. The controller reads that WorkloadCheckpoint's status.targets
+# and fans out one GPURestore per replica; the webhook injects them into new Pods.
+apiVersion: gpu-cr.io/v1alpha1
+kind: WorkloadRestore
+metadata:
+  name: workloadrestore-1
+  namespace: default
+spec:
+  targetWorkloadRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    namespace: default
+    name: deploy-1
+  checkpointRef:
+    name: wckpt-deploy-1        # the source WorkloadCheckpoint
+    namespace: default
+  server: "10.178.0.14"          # NFS server; turns stored paths into nfs:// URIs
+  blobMode: direct               # optional: NFS-direct blob (no local copy)

@@ -1,0 +1,57 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: gpurestores.gpu-cr.io
+spec:
+  group: gpu-cr.io
+  names:
+    kind: GPURestore
+    listKind: GPURestoreList
+    plural: gpurestores
+    singular: gpurestore
+    shortNames: [gpurst]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - {name: Parent, type: string, jsonPath: .spec.workloadRestoreRef.name}
+        - {name: SourcePod, type: string, jsonPath: .spec.targetPodName}
+        - {name: Phase, type: string, jsonPath: .status.phase}
+        - {name: RestoredPod, type: string, jsonPath: .status.restoredPodName}
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            apiVersion: {type: string}
+            kind: {type: string}
+            metadata: {type: object}
+            spec:
+              type: object
+              required: [checkpointInfo]
+              properties:
+                workloadRestoreRef:
+                  type: object
+                  properties:
+                    name: {type: string}
+                    namespace: {type: string}
+                checkpointInfo:
+                  type: object
+                  required: [checkpointUri]
+                  properties:
+                    podUid: {type: string}
+                    checkpointUri: {type: string}
+                    dataUri: {type: string}
+                    node: {type: string}
+                targetPodName: {type: string}
+                blobMode: {type: string, enum: [copy, direct]}
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+              properties:
+                phase: {type: string}
+                restoredPodName: {type: string}
+                message: {type: string}
