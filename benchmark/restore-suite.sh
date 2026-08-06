@@ -24,6 +24,8 @@
 #      REMAP_TIMEOUT=120, NODE_SSH="" (phase split needs it), OUT=restore-suite.csv,
 #      CRIO_UNIT=crio, AGENT_UNIT=gpu-cr-restore-agent, KUBECTL=kubectl, NS=default,
 #      DATA_DIR=/var/lib/gcr-data, STAGE_DIR=/var/lib/gpu-cr/restore, KEEP_LAST=0
+#      BLOB_MODE="" (set "direct" = CRI-O symlinks the GPU blob to its NFS path instead
+#        of copying it; NFS_HOSTPATH=/mnt/nfs, NFS_MOUNTPATH=/mnt/nfs mounted into the pod)
 set -uo pipefail
 TEMPLATE=${TEMPLATE:?set TEMPLATE to a reference restore manifest (gen-restore-pod.sh, once)}
 SERVER=${SERVER:?set SERVER to the NFS server IP}
@@ -71,6 +73,22 @@ if mp and mh:
         vols=d["spec"].setdefault("volumes",[])
         if not any(v.get("name")=="models" for v in vols):
             vols.append({"name":"models","hostPath":{"path":mh}})
+# BLOB_MODE: pass gpu-cr.io/blob-mode to CRI-O. "direct" makes CRI-O symlink the GPU
+# data blob to its node-local (NFS-mounted) path instead of copying it, so the
+# interceptor reads it straight from NFS at remap. That symlink target must resolve
+# INSIDE the pod, so mount the NFS root here too (NFS_HOSTPATH -> NFS_MOUNTPATH).
+bm=os.environ.get("BLOB_MODE","")
+if bm:
+    a["gpu-cr.io/blob-mode"]=bm
+    if bm=="direct":
+        nh=os.environ.get("NFS_HOSTPATH","/mnt/nfs"); nm=os.environ.get("NFS_MOUNTPATH","/mnt/nfs")
+        if nh and nm:
+            c=d["spec"]["containers"][0]; vms=c.setdefault("volumeMounts",[])
+            if not any(v.get("mountPath")==nm for v in vms):
+                vms.append({"name":"gcr-nfs","mountPath":nm,"readOnly":True})
+            vols=d["spec"].setdefault("volumes",[])
+            if not any(v.get("name")=="gcr-nfs" for v in vols):
+                vols.append({"name":"gcr-nfs","hostPath":{"path":nh}})
 print(yaml.safe_dump(d,default_flow_style=False,sort_keys=False))
 PY
 }

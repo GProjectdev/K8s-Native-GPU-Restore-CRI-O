@@ -16,6 +16,16 @@ package server
 //	gpu-cr.io/restore: "true"
 //	gpu-cr.io/checkpoint-uri: "<scheme>://<location>/<path>.tar"
 //	gpu-cr.io/data-uri: "<...>.blob"   (optional; default: checkpoint-uri .tar->.blob)
+//	gpu-cr.io/blob-mode: "copy"|"direct" (optional; default copy)
+//
+// blob-mode=direct does NOT copy the (large) GPU data blob to local disk. Instead it
+// symlinks the interceptor's blob path to the blob's node-local location (e.g. an
+// already-mounted NFS export), so the restored interceptor reads the GPU data
+// straight from that storage during remap (H2D) — the same way a plain deployment
+// streams model weights from NFS. This removes the local-disk WRITE that dominates
+// staging for large models. Requirement: the restore Pod must mount that storage so
+// the symlink target resolves inside the Pod (e.g. hostPath /mnt/nfs -> /mnt/nfs).
+// If the blob is not reachable node-locally, direct mode falls back to copy.
 //
 // It fetches TWO artifacts: the checkpoint tar (CPU + GPU control state), which it
 // points the container image at, and the external GPU data blob (the interceptor
@@ -53,13 +63,14 @@ import (
 )
 
 const (
-	gpuCRRestoreAnnotation = "gpu-cr.io/restore"
-	gpuCRURIAnnotation     = "gpu-cr.io/checkpoint-uri"
-	gpuCRSrcUIDAnnotation  = "gpu-cr.io/source-pod-uid"
-	gpuCRDataURIAnnotation = "gpu-cr.io/data-uri"
-	gpuCRDataDirAnnotation = "gpu-cr.io/data-dir"
-	gpuCRStageDir          = "/var/lib/gpu-cr/restore"
-	gpuCRDefaultDataDir    = "/var/lib/gcr-data"
+	gpuCRRestoreAnnotation  = "gpu-cr.io/restore"
+	gpuCRURIAnnotation      = "gpu-cr.io/checkpoint-uri"
+	gpuCRSrcUIDAnnotation   = "gpu-cr.io/source-pod-uid"
+	gpuCRDataURIAnnotation  = "gpu-cr.io/data-uri"
+	gpuCRDataDirAnnotation  = "gpu-cr.io/data-dir"
+	gpuCRBlobModeAnnotation = "gpu-cr.io/blob-mode" // "copy" (default) | "direct"
+	gpuCRStageDir           = "/var/lib/gpu-cr/restore"
+	gpuCRDefaultDataDir     = "/var/lib/gcr-data"
 )
 
 // stageGPUCheckpoint makes the checkpoint referenced by gpu-cr.io/checkpoint-uri
@@ -121,6 +132,7 @@ func (s *Server) stageGPUCheckpoint(ctx context.Context, sbAnnotations map[strin
 	if dataDir == "" {
 		dataDir = gpuCRDefaultDataDir
 	}
+	blobMode := strings.TrimSpace(ann[gpuCRBlobModeAnnotation])
 	blobURI, blobExplicit := strings.TrimSpace(ann[gpuCRDataURIAnnotation]), true
 	if blobURI == "" {
 		blobURI, blobExplicit = deriveBlobURI(uri), false
@@ -131,6 +143,17 @@ func (s *Server) stageGPUCheckpoint(ctx context.Context, sbAnnotations map[strin
 			log.Warnf(ctx, "gpu-cr: have GPU data blob %q but no %s; cannot tell the interceptor where to read it", blobURI, gpuCRSrcUIDAnnotation)
 		default:
 			blobDst := filepath.Join(dataDir, srcUID, "data.blob")
+			// direct mode: symlink the blob to its node-local (e.g. NFS-mounted)
+			// location instead of copying it. Removes the big local-disk write; the
+			// interceptor reads the blob straight from that storage during remap.
+			if blobMode == "direct" {
+				if err := linkBlobDirect(blobURI, blobDst); err != nil {
+					log.Warnf(ctx, "gpu-cr: direct blob link for %q failed (%v); falling back to copy", blobURI, err)
+				} else {
+					log.Infof(ctx, "gpu-cr: linked GPU data blob %q -> %s (direct; no local copy — Pod must mount the blob's storage)", blobURI, blobDst)
+					break
+				}
+			}
 			if err := stageCheckpointURI(ctx, blobURI, blobDst); err != nil {
 				if blobExplicit {
 					return fmt.Errorf("stage GPU data blob %q: %w", blobURI, err)
@@ -147,7 +170,7 @@ func (s *Server) stageGPUCheckpoint(ctx context.Context, sbAnnotations map[strin
 	if cfg.Annotations == nil {
 		cfg.Annotations = map[string]string{}
 	}
-	for _, k := range []string{gpuCRRestoreAnnotation, gpuCRURIAnnotation, gpuCRSrcUIDAnnotation, gpuCRDataURIAnnotation, gpuCRDataDirAnnotation} {
+	for _, k := range []string{gpuCRRestoreAnnotation, gpuCRURIAnnotation, gpuCRSrcUIDAnnotation, gpuCRDataURIAnnotation, gpuCRDataDirAnnotation, gpuCRBlobModeAnnotation} {
 		if v := ann[k]; v != "" {
 			cfg.Annotations[k] = v
 		}
@@ -165,6 +188,56 @@ func deriveBlobURI(tarURI string) string {
 		return strings.TrimSuffix(tarURI, ".tar") + ".blob"
 	}
 	return ""
+}
+
+// resolveNodeLocalPath maps a blob URI to a path expected to be reachable on THIS
+// node's filesystem (e.g. via an already-mounted NFS export). Used by direct blob
+// mode, which reads the GPU data blob in place instead of copying it locally.
+// Returns "" for schemes with no node-local path (http/https/s3).
+func resolveNodeLocalPath(uri string) string {
+	uri = strings.TrimSpace(uri)
+	scheme, rest, ok := strings.Cut(uri, "://")
+	if !ok {
+		return uri // a bare path is already node-local
+	}
+	switch scheme {
+	case "file", "hostpath":
+		return "/" + strings.TrimPrefix(rest, "/")
+	case "nfs":
+		// nfs://<server>/<export-path>/<file> -> /<export-path>/<file>; assumes the
+		// export is mounted so the file is reachable at that absolute path locally.
+		_, path, ok := strings.Cut(rest, "/")
+		if !ok {
+			return ""
+		}
+		return "/" + path
+	default:
+		return ""
+	}
+}
+
+// linkBlobDirect makes the GPU data blob available at dst WITHOUT copying it, by
+// symlinking dst to the node-local (e.g. NFS-mounted) blob file. The restored
+// interceptor then reads the blob directly from that storage during remap (H2D),
+// eliminating the local-disk write that dominates staging for large models. The
+// restore Pod must mount that storage so the symlink target resolves inside the Pod.
+func linkBlobDirect(blobURI, dst string) error {
+	src := resolveNodeLocalPath(blobURI)
+	if src == "" {
+		return fmt.Errorf("no node-local path for %q (direct mode needs file/hostpath/nfs)", blobURI)
+	}
+	fi, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("blob not present node-locally at %s: %w", src, err)
+	}
+	if fi.IsDir() {
+		return fmt.Errorf("blob path %s is a directory", src)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	_ = os.Remove(dst) // replace any stale file/symlink
+	return os.Symlink(src, dst)
 }
 
 // stageCheckpointURI copies/downloads the checkpoint archive at uri to dst.

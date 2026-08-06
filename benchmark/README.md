@@ -231,3 +231,41 @@ Model names are normalized so `/models/opt-1.3b` matches the suite's
 `pytorch-facebook-opt-1-3b`. Requires each model under the pod's `/models` mount and the
 image pre-pulled.
 
+
+## Direct blob mode (skip the local copy) — `BLOB_MODE=direct`
+
+For large models, restore time is dominated by **staging**: CRI-O copies the whole
+checkpoint (tar + GPU-data `.blob`) from NFS to local disk before CRIU restores it.
+The `.blob` is the big part (e.g. ~13 GB for opt-6.7b), and copying it is a full
+local **write** on top of the NFS read.
+
+`gpu-cr.io/blob-mode: direct` removes that write. Instead of copying the blob, CRI-O
+**symlinks** the interceptor's blob path to the blob's node-local (NFS-mounted)
+location, so the restored interceptor reads the GPU data **straight from NFS** during
+remap (H2D) — the same way a plain deployment streams model weights from NFS. Staging
+then costs a single NFS read instead of read+write+reread.
+
+Requirements:
+- The blob must be reachable at a node-local path (an NFS export already mounted, e.g.
+  `nfs://<srv>/mnt/nfs/gcr/x.blob` reachable at `/mnt/nfs/gcr/x.blob`). If not, direct
+  mode logs a warning and **falls back to copy** (never breaks).
+- The restore Pod must mount that storage so the symlink target resolves inside the
+  Pod. `restore-suite.sh BLOB_MODE=direct` adds a `hostPath` mount
+  (`NFS_HOSTPATH=/mnt/nfs -> NFS_MOUNTPATH=/mnt/nfs`) automatically.
+
+Run it:
+```bash
+TEMPLATE=deploy/restore-template.yaml SERVER=10.178.0.14 \
+CKPTS_FILE=ckpts-gcronly.txt RUNS=3 NODE_SSH="ssh jsj-worker-2" \
+DROP_CACHES=1 BLOB_MODE=direct OUT=restore-direct.csv \
+./benchmark/restore-suite.sh
+```
+Compare `restore-direct.csv` against the default (copy) run: `stage_s` should drop
+sharply for large models, so `usable` approaches — and for big models beats — the
+cold-start baseline (the GCR restore compute stays ~7-8 s).
+
+Caveats:
+- The in-Pod interceptor should **stream-read** the blob (`read()`), not `mmap()` it,
+  since `mmap` over NFS has coherency caveats.
+- A local copy decouples restore from NFS availability during the restore window;
+  direct mode trades that for speed. Default remains `copy`.
