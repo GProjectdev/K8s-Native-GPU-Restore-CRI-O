@@ -3,13 +3,13 @@
 # It only CREATES GPURestore objects and injects gpu-cr.io/* annotations into new
 # Pods. Set `image:` to your registry tag before applying.
 #
+# NOTE: this file does NOT create the gpu-cr-system namespace (it is SHARED with the
+# checkpoint Node Agent). Ensure it exists first: kubectl create namespace gpu-cr-system
+# (or deploy the Node Agent). Never `kubectl delete -f` a manifest that owns a shared ns.
+#
 # WEBHOOK TLS (no cert-manager): run deploy/gen-webhook-certs.sh AFTER applying
 # this file. It creates the tls Secret and patches this webhook's caBundle. Until
 # then failurePolicy=Ignore keeps the (unverified) webhook from blocking Pods.
-apiVersion: v1
-kind: Namespace
-metadata: {name: gpu-cr-system}
----
 apiVersion: v1
 kind: ServiceAccount
 metadata: {name: gpu-cr-restore-orchestrator, namespace: gpu-cr-system}
