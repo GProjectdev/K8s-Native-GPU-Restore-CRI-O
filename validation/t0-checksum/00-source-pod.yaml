@@ -1,0 +1,69 @@
+# T0 — source workload. Same wiring as repo A's deploy/sample-pod.yaml, but the
+# tensor is DETERMINISTIC and the pod prints a SHA-256 of the full GPU buffer so
+# the value can be compared byte-for-byte after restore.
+#
+# Split of responsibilities (repo A `main`):
+#   data buffer  -> GCR interceptor  -> data.blob   (/var/lib/gcr-data)
+#   control+CPU  -> CRIU + cuda_plugin (CRIUgpu)    -> Checkpoint.tar
+apiVersion: v1
+kind: Pod
+metadata:
+  name: t0-cuda-checksum
+  namespace: default
+  labels: { app: t0-cuda-checksum }
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ${MERGED_NODE}
+  restartPolicy: Never
+  containers:
+    - name: cuda-app
+      image: pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+      command: ["python", "-u", "-c"]
+      args:
+        - |
+          import torch, hashlib, time
+          assert torch.cuda.is_available(), "CUDA not available"
+          # 128M float32 = 512 MiB, fully deterministic (no RNG, no seed drift).
+          n = 128 * 1024 * 1024
+          idx = torch.arange(n, dtype=torch.float32, device='cuda')
+          x = torch.sin(idx * 1e-6) + torch.cos(idx * 3e-7)
+          del idx
+          torch.cuda.synchronize()
+
+          def digest(t):
+              return hashlib.sha256(t.detach().cpu().numpy().tobytes()).hexdigest()
+
+          print("READY gpu_alloc bytes=%d" % (x.numel() * x.element_size()))
+          print("CHECKSUM %s" % digest(x))
+          while True:
+              time.sleep(30)
+              # Recomputed from the SAME device buffer. After a correct restore
+              # this must still equal the value printed above.
+              print("CHECKSUM %s" % digest(x))
+      env:
+        - name: GCR_VMM_ALLOC
+          value: "1"
+        - name: LD_PRELOAD
+          value: /opt/gpu-cr/libgcr-interceptor.so
+        - name: GCR_HOME
+          value: /opt/gpu-cr
+        - name: GCR_POD_UID
+          valueFrom:
+            fieldRef: { fieldPath: metadata.uid }
+        - name: GCR_CONTROL_DIR
+          value: /var/lib/gpu-cr/run
+        - name: GCR_DATA_DIR
+          value: /var/lib/gcr-data
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
+      volumeMounts:
+        - { name: gpu-cr-lib,    mountPath: /opt/gpu-cr, readOnly: true }
+        - { name: gpu-cr-run,    mountPath: /var/lib/gpu-cr/run }
+        - { name: gcr-checkpoint, mountPath: /var/lib/gcr-checkpoint }
+        - { name: gcr-data,      mountPath: /var/lib/gcr-data }
+  volumes:
+    - { name: gpu-cr-lib,    hostPath: { path: /var/lib/gpu-cr/lib,   type: Directory } }
+    - { name: gpu-cr-run,    hostPath: { path: /var/lib/gpu-cr/run,   type: DirectoryOrCreate } }
+    - { name: gcr-checkpoint, hostPath: { path: /var/lib/gcr-checkpoint, type: DirectoryOrCreate } }
+    - { name: gcr-data,      hostPath: { path: /var/lib/gcr-data,     type: DirectoryOrCreate } }

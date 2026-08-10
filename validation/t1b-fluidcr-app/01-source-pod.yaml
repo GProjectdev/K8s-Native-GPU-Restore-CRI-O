@@ -1,0 +1,48 @@
+# T1b — FluidCR-managed training pod.
+#
+# Adapted from FluidCR's examples/prod/training-pod.yaml. Two deliberate
+# differences, because this cluster is not configured the way those examples
+# assume:
+#   - no DRA resourceClaims / runtimeClassName: nvidia-cdi
+#     (this cluster runs the stock NVIDIA device plugin with the default envvar
+#      strategy, so GPUs come through resources.limits)
+#   - the training script comes from a ConfigMap rather than the FluidCR demo one
+#
+# Everything that matters for the test is unchanged: fluidcr-launcher wraps the
+# script, the payload is injected via sitecustomize, and the control API listens
+# on 8298.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: t1b-fluidcr-src
+  namespace: default
+  labels: { app: t1b-fluidcr-src }
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ${TARGET_NODE}
+  restartPolicy: Never
+  containers:
+    - name: trainer
+      image: pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          set -x
+          python -m pip install --upgrade pip
+          pip install fluidcr
+          echo "FLUIDCR_INSTALLED"
+          fluidcr-launcher python -u /workspace/train.py
+      env:
+        - name: FLUIDCR_CTRL_PORT
+          value: "8298"
+        - name: OMP_NUM_THREADS
+          value: "1"
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
+      volumeMounts:
+        - { name: workspace,  mountPath: /workspace }
+        - { name: checkpoint, mountPath: /checkpoint }
+  volumes:
+    - { name: workspace,  configMap: { name: t1b-train-script } }
+    - { name: checkpoint, emptyDir: {} }

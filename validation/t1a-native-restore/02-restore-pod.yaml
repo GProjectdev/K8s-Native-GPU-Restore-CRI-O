@@ -1,0 +1,24 @@
+# T1 — restore through CRI-O's NATIVE path.
+#
+#   checkpoint-restore.crio.io/<container> = the checkpoint tar path on the node
+#
+# This is FluidCR's restore convention, but it is CRI-O functionality, not
+# FluidCR's. No gpu-cr.io/* annotation here: this pod must NOT take the GCR path.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: t1-native-restore
+  namespace: default
+  labels: { app: t1-native-restore }
+  annotations:
+    checkpoint-restore.crio.io/gpu-app: "${CKPT_PATH}"
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ${TARGET_NODE}
+  restartPolicy: Never
+  containers:
+    - name: gpu-app
+      image: pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+      resources:
+        limits:
+          nvidia.com/gpu: "1"

@@ -1,0 +1,50 @@
+# T2 — CROSS-NODE system-level restore.
+#
+# This is the case staging exists for. Every sample so far used
+# hostpath:///var/lib/gcr-checkpoint/... which is node-local and therefore only
+# ever exercised a SAME-NODE restore. Here the checkpoint is taken on
+# ${MERGED_NODE} and restored on ${RESTORE_NODE} from an NFS URI the target node
+# can reach.
+#
+# PRECONDITION: the checkpoint tar AND the data.blob directory must both be on
+# the share. data.blob is not inside the tar — a restore without it produces a
+# process that runs with stale GPU memory.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: t2-restore-crossnode
+  namespace: default
+  labels: { app: t2-restore-crossnode }
+  annotations:
+    gpu-cr.io/restore: "true"
+    gpu-cr.io/checkpoint-uri: "nfs://${NFS_ENDPOINT}${NFS_PATH}/${CKPT_TAR}"
+    gpu-cr.io/source-pod-uid: "${SOURCE_POD_UID}"
+    gpu-cr.io/source-node: "${MERGED_NODE}"
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ${RESTORE_NODE}
+  restartPolicy: Never
+  containers:
+    - name: cuda-app
+      # kubelet parses and validates this BEFORE CRI-O ever sees the request, so it
+      # must be a normal OCI reference — an absolute path is rejected with
+      # InvalidImageName ("repository name must be lowercase" / invalid reference
+      # format). The real archive path is substituted inside CRI-O:
+      # stageGPUCheckpoint() runs at the top of CreateContainer, stages
+      # gpu-cr.io/checkpoint-uri onto the node and rewrites cfg.Image to the local
+      # tar, after which CRI-O's own "local archive" detection drives the restore.
+      # So any image kubelet accepts works here; this one is already on the node.
+      image: pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
+      volumeMounts:
+        - { name: gpu-cr-lib,    mountPath: /opt/gpu-cr, readOnly: true }
+        - { name: gpu-cr-run,    mountPath: /var/lib/gpu-cr/run }
+        - { name: gcr-checkpoint, mountPath: /var/lib/gcr-checkpoint }
+        - { name: gcr-data,      mountPath: /var/lib/gcr-data }
+  volumes:
+    - { name: gpu-cr-lib,    hostPath: { path: /var/lib/gpu-cr/lib,   type: Directory } }
+    - { name: gpu-cr-run,    hostPath: { path: /var/lib/gpu-cr/run,   type: DirectoryOrCreate } }
+    - { name: gcr-checkpoint, hostPath: { path: /var/lib/gcr-checkpoint, type: DirectoryOrCreate } }
+    - { name: gcr-data,      hostPath: { path: /var/lib/gcr-data,     type: DirectoryOrCreate } }
