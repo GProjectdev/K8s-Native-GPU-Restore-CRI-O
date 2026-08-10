@@ -15,6 +15,7 @@ export TARGET_NODE FLUIDCR_IMAGE FLUIDCR_CHECKPOINT_PATH
 outdir "t1-fluidcr-${TARGET_NODE}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SINCE="$(date '+%Y-%m-%d %H:%M:%S')"
+announce_journal_hint "$TARGET_NODE" "$SINCE"
 info "target node = $TARGET_NODE"
 
 step "1/4  source workload + FluidCR checkpoint"

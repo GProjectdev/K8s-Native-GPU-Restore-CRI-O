@@ -13,6 +13,7 @@ export SOURCE_POD_UID CKPT_TAR TARGET_NODE MERGED_NODE FLUIDCR_CHECKPOINT_PATH F
 outdir t4-dispatch
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SINCE="$(date '+%Y-%m-%d %H:%M:%S')"
+announce_journal_hint "$MERGED_NODE" "$SINCE"
 
 step "1/3  system-mode pod"
 kubectl -n "$NS" delete pod t0-restore t1-fluidcr-restore --ignore-not-found --wait=true >/dev/null 2>&1 || true

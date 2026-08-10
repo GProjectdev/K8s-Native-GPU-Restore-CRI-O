@@ -14,6 +14,7 @@ export SOURCE_POD_UID CKPT_TAR RESTORE_NODE MERGED_NODE NFS_ENDPOINT NFS_PATH
 outdir t2-crossnode-system
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SINCE="$(date '+%Y-%m-%d %H:%M:%S')"
+announce_journal_hint "$RESTORE_NODE" "$SINCE"
 info "source node = $MERGED_NODE   restore node = $RESTORE_NODE"
 warn "RESTORE_NODE must ALSO run the merged CRI-O. If it is still the pre-merge control node, switch it first."
 

@@ -16,6 +16,7 @@ export FLUIDCR_IMAGE APP_PAYLOAD SOURCE_NODE RESTORE_NODE NFS_ENDPOINT NFS_PATH
 outdir t5-crossnode-app
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SINCE="$(date '+%Y-%m-%d %H:%M:%S')"
+announce_journal_hint "$RESTORE_NODE" "$SINCE"
 info "source = $SOURCE_NODE   restore = $RESTORE_NODE   payload = $APP_PAYLOAD"
 
 step "1/3  payload reachable"

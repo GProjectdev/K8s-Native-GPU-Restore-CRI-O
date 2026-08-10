@@ -123,12 +123,31 @@ ssh-copy-id root@jsj-worker-1
 ssh-copy-id root@jsj-worker-2        # only needed for the cross-node tests
 ```
 
-then run the tests from `jsj-master`. `node_journal` uses local `journalctl` when
-the hostname matches the target node and `ssh` otherwise.
+ssh is convenient but not required. `node_journal` tries three sources in order:
 
-Without that ssh access the journal comes back empty. `require_journal` catches
-this and fails the affected checks explicitly — an empty log must never read as
-"the bad log line is absent".
+1. **`CRIO_LOG=<file>`** — a journal you collected yourself. No ssh at all.
+2. **local `journalctl`** — when the suite runs on the target node.
+3. **ssh** — key-based access to the target node.
+
+If none work it prints the exact command to run on the node and fails the
+log-based checks rather than passing them. An empty log must never read as
+"the bad log line is absent" — that is what `require_journal` guards.
+
+**Two-terminal workflow (no ssh).** Each test prints the `--since` timestamp it
+will use and, when it cannot reach the node, tells you to start this on the node
+before continuing:
+
+```bash
+# terminal 2, on jsj-worker-1
+journalctl -u crio --since '<timestamp printed by the test>' -f | tee /tmp/crio.log
+```
+
+Ctrl-C when the test finishes, copy the file to wherever you ran the test, and
+re-run just the log evaluation:
+
+```bash
+CRIO_LOG=/tmp/crio.log ./t3-isolation/run.sh
+```
 
 Everything lands under `validation/results/<timestamp>-<test>/`: rendered
 manifests, pod logs, CRI-O journal slices, checksums. `results/` is gitignored —

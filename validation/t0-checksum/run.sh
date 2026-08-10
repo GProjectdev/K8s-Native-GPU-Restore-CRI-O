@@ -8,6 +8,7 @@
 outdir t0-checksum
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SINCE="$(date '+%Y-%m-%d %H:%M:%S')"
+announce_journal_hint "$MERGED_NODE" "$SINCE"
 export MERGED_NODE
 
 step "1/5  start source workload"

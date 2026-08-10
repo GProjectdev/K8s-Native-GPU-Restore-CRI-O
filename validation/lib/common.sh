@@ -62,6 +62,18 @@ outdir() { # outdir <test-name>
   info "results -> $OUTDIR"
 }
 
+# Print, at the start of a test, how to capture the journal by hand in a second
+# terminal. Cheaper than setting up ssh if you only need one run.
+announce_journal_hint() { # announce_journal_hint <node> <since>
+  [ -n "${CRIO_LOG:-}" ] && return 0
+  if [ "$(hostname)" != "$1" ] && ! ssh -o BatchMode=yes -o ConnectTimeout=5 "$1" true 2>/dev/null; then
+    warn "no ssh to $1 — to capture CRI-O logs, run this on $1 in another terminal NOW:"
+    warn "    journalctl -u crio --since '$2' -f | tee /tmp/crio.log"
+    warn "then Ctrl-C when this test finishes and re-run with CRIO_LOG=/tmp/crio.log"
+    echo
+  fi
+}
+
 # ---- kube helpers -------------------------------------------------------------
 wait_pod_phase() { # wait_pod_phase <pod> <phase> [timeout]
   local pod="$1" want="$2" t="${3:-$TIMEOUT}" i=0 cur=
@@ -93,16 +105,36 @@ pod_checksum() {
 }
 
 # ---- node-side log capture ----------------------------------------------------
-# Run the suite on the node, or have passwordless ssh to it.
+# Three ways to get the CRI-O journal, tried in order:
+#   1. CRIO_LOG=<file>  — a journal you collected yourself (no ssh needed)
+#   2. local journalctl — when the suite runs on the target node
+#   3. ssh              — key-based access to the target node
+# If all three fail, print the exact command to run on the node.
 node_journal() { # node_journal <node> <since> <outfile>
   local node="$1" since="$2" out="$3"
   : > "$out"
-  if [ "$(hostname)" = "$node" ] || [ "$(hostname -s 2>/dev/null)" = "${node%%.*}" ]; then
-    sudo journalctl -u crio --since "$since" --no-pager >> "$out" 2>&1 || true
-  else
-    ssh -o BatchMode=yes "$node" "sudo journalctl -u crio --since '$since' --no-pager" >> "$out" 2>&1 \
-      || warn "could not pull the journal from $node — collect it manually into $out"
+
+  if [ -n "${CRIO_LOG:-}" ] && [ -f "${CRIO_LOG}" ]; then
+    cat "${CRIO_LOG}" > "$out"
+    info "using the pre-collected journal: ${CRIO_LOG}"
+    return 0
   fi
+
+  if [ "$(hostname)" = "$node" ] || [ "$(hostname -s 2>/dev/null)" = "${node%%.*}" ]; then
+    journalctl -u crio --since "$since" --no-pager >> "$out" 2>&1 || true
+    [ -s "$out" ] && return 0
+  elif ssh -o BatchMode=yes -o ConnectTimeout=5 "$node" true 2>/dev/null; then
+    ssh -o BatchMode=yes "$node" "journalctl -u crio --since '$since' --no-pager" >> "$out" 2>&1 || true
+    [ -s "$out" ] && return 0
+  fi
+
+  warn "could not collect the CRI-O journal from $node"
+  warn "run this ON $node:"
+  warn "    journalctl -u crio --since '$since' --no-pager > /tmp/crio.log"
+  warn "then re-run this test with:"
+  warn "    CRIO_LOG=/tmp/crio.log $0"
+  warn "(scp it over first if you are not on $node)"
+  return 1
 }
 
 # require_journal <file> <node>
