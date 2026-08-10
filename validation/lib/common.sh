@@ -101,6 +101,24 @@ read_artifact() {   # read_artifact <dir> <filename>    -> first line, trimmed
   head -1 "$1/$2" | tr -d '[:space:]'
 }
 
+# Quiet predicate: is this a single whitespace-free token?
+is_single_token() {
+  case "$1" in
+    "" | *[[:space:]]* ) return 1 ;;
+    * ) return 0 ;;
+  esac
+}
+
+# Prefer an env-supplied value, but fall back to the artifact when the env value
+# is malformed. A stale `export FOO=$(cat results/*-x/foo)` from an earlier
+# attempt outlives the shell command that set it and would otherwise beat the
+# auto-discovery with two concatenated values.
+prefer_env_else_artifact() {   # <env-value> <dir> <file> <name-for-messages>
+  if is_single_token "$1"; then printf '%s' "$1"; return 0; fi
+  [ -n "$1" ] && warn "$4 from the environment is malformed; re-reading from $2 (unset it to silence this)" >&2
+  read_artifact "$2" "$3"
+}
+
 # A value that should be a single token. Catches the concatenated-glob mistake.
 require_single_token() {  # require_single_token <name> <value>
   case "$2" in

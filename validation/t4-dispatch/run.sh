@@ -4,8 +4,8 @@
 # Override with T0DIR / APPDIR / the individual vars if you need a specific run.
 T0DIR="${T0DIR:-$(latest_result t0-checksum)}"
 info "system-mode artifacts from: ${T0DIR:-<none>}"
-SOURCE_POD_UID="${SOURCE_POD_UID:-$(read_artifact "$T0DIR" source-pod-uid)}"
-CKPT_TAR="${CKPT_TAR:-$(read_artifact "$T0DIR" ckpt-tar)}"
+SOURCE_POD_UID="$(prefer_env_else_artifact "${SOURCE_POD_UID:-}" "$T0DIR" source-pod-uid SOURCE_POD_UID)"
+CKPT_TAR="$(prefer_env_else_artifact "${CKPT_TAR:-}" "$T0DIR" ckpt-tar CKPT_TAR)"
 
 # Application side: prefer t1b (a real application-level checkpoint, so this test
 # shows two MODES); fall back to t1a (two CRI-O ENTRY POINTS only).
@@ -21,7 +21,7 @@ else
   warn "not two MODES. Say so in the write-up."
 fi
 info "application-mode artifacts from: ${APPDIR:-<none>}"
-CKPT_PATH="${CKPT_PATH:-$(read_artifact "$APPDIR" ckpt-path)}"
+CKPT_PATH="$(prefer_env_else_artifact "${CKPT_PATH:-}" "$APPDIR" ckpt-path CKPT_PATH)"
 
 TARGET_NODE="$MERGED_NODE"
 export SOURCE_POD_UID CKPT_TAR CKPT_PATH TARGET_NODE MERGED_NODE APP_POD APP_MANIFEST
