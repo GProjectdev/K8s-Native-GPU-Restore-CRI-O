@@ -61,7 +61,11 @@ kubectl -n "$NS" logs "$APP_POD" > "$OUTDIR/app-pod.log" 2>&1 || true
 step "3/3  log separation"
 node_journal "$MERGED_NODE" "$SINCE" "$OUTDIR/crio.log"
 if require_journal "$OUTDIR/crio.log" "$MERGED_NODE"; then
-  grep -E 'CRImportCheckpoint|CRImportCheckpointFromPath|gpu-cr:' "$OUTDIR/crio.log" > "$OUTDIR/dispatch.log" 2>/dev/null || true
+  # The figure has to show BOTH sides. gpu-cr: lines alone only show the system
+  # path; the application pod's evidence is its container being created with no
+  # gpu-cr line attached, so its CreateContainer entries belong in the same file.
+  grep -E "gpu-cr:|Creating container: ${NS}/(t0-restore|${APP_POD})/|Started container" \
+       "$OUTDIR/crio.log" > "$OUTDIR/dispatch.log" 2>/dev/null || true
   cat "$OUTDIR/dispatch.log"
 
   # 'gpu-cr: staged checkpoint' is only printed on SUCCESS. The gate firing at all

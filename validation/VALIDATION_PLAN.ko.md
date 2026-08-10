@@ -30,11 +30,29 @@ Progress Report의 핵심 주장은 하나입니다.
 | `t3-isolation` | annotation 없는 GPU Pod에 staging이 끼어들지 않음 | **D** | ✅ 완료 |
 | `t0-checksum` | system C/R 후 GPU 텐서가 바이트 단위 동일 | **A** | ✅ 완료 |
 | `t1a-native-restore` | (선택) 네이티브 진입점이 도달 가능한가 — **t1b 실패 시 진단용** | — | 선택 |
-| `t1b-fluidcr-app` | **실제 애플리케이션 레벨 C/R** + 학습 step 재개 | **B** | 미실행 |
-| `t4-dispatch` | 두 Pod가 각자 경로로 가고 교차하지 않음 | **C** (완성) | 미실행 |
+| `t1b-fluidcr-app` | **실제 애플리케이션 레벨 C/R** + 학습 step 재개 | **B** | ✅ 완료 (step 1260 재개) |
+| `t4-dispatch` | 두 Pod가 각자 경로로 가고 교차하지 않음 | **C** (완성) | ✅ 완료 (7/7) |
 | `t2-crossnode-system` | staging 으로 다른 노드에서 복원 | 추가 | 미실행 |
 
-**현재 A와 D가 채워져 있고, C의 상당 부분도 t0 가 이미 증명했습니다.**
+**A · B · C · D 네 조각이 모두 채워졌습니다 (2026-08-10).**
+
+t4 실행 결과 `results/20260810-083716-t4-dispatch/dispatch.log`:
+
+- system Pod → `gpu-cr: restore annotation detected` → `staged checkpoint` → `staged GPU data blob`
+- application Pod → 컨테이너 생성됨. **`gpu-cr:` 줄이 하나도 붙지 않음** (교차 없음)
+- 둘 다 같은 노드(`jsj-worker-1`)의 **같은 CRI-O 프로세스**(`crio[566]`)에서, **동시에** Running
+
+> 실제로 돈 스크립트는 두 Pod을 동시에 띄우는 버전이었고, worker-1 의 GPU 가 2장
+> 이상이라 둘 다 스케줄됐습니다. 순차 실행보다 강한 결과이므로 이 로그를 그대로
+> 씁니다.
+
+부수적으로 확인된 것 (계획에 없던 소득):
+
+| | |
+|---|---|
+| `staged GPU data blob → /var/lib/gcr-data/<uid>/data.blob` | **`data.blob` 도 staging 된다.** t2 의 구멍이라고 적어둔 것은 틀렸음 |
+| `gpu-cr: ext-mount-map` 4줄 (StartContainer) | ⑤ `buildGCRExtMountMapLines()` 동작 확인 |
+| blob 경로에 source-pod-uid 가 박혀 있음 | ③ annotation 전파 동작 확인 |
 
 `t0-checksum` 은 `CRImportCheckpoint` → `buildContainerConfig` 를 통과했고, 그 안에
 ②CDI 가드가 있습니다. **체크섬이 맞았다는 것 자체가 GPU 디바이스가 정상 주입됐다는
