@@ -20,6 +20,7 @@
 TARGET_NODE="${TARGET_NODE:-$MERGED_NODE}"
 export TARGET_NODE
 outdir "t1-native-${TARGET_NODE}"
+register_cleanup t1a-native-src t1a-native-restore
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SINCE="$(date '+%Y-%m-%d %H:%M:%S')"
 announce_journal_hint "$TARGET_NODE" "$SINCE"

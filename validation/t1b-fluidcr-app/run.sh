@@ -14,6 +14,7 @@
 TARGET_NODE="${TARGET_NODE:-$MERGED_NODE}"
 export TARGET_NODE
 outdir "t1b-fluidcr-${TARGET_NODE}"
+register_cleanup t1b-fluidcr-src t1b-fluidcr-restore
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SINCE="$(date '+%Y-%m-%d %H:%M:%S')"
 announce_journal_hint "$TARGET_NODE" "$SINCE"

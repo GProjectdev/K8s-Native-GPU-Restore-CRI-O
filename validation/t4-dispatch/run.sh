@@ -27,6 +27,7 @@ TARGET_NODE="$MERGED_NODE"
 export SOURCE_POD_UID CKPT_TAR CKPT_PATH TARGET_NODE MERGED_NODE APP_POD APP_MANIFEST
 
 outdir t4-dispatch
+register_cleanup t0-restore t1a-native-restore t1b-fluidcr-restore
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 step "0/3  inputs"
@@ -57,8 +58,18 @@ if require_journal "$OUTDIR/crio.log" "$MERGED_NODE"; then
   grep -E 'CRImportCheckpoint|CRImportCheckpointFromPath|gpu-cr:' "$OUTDIR/crio.log" > "$OUTDIR/dispatch.log" 2>/dev/null || true
   cat "$OUTDIR/dispatch.log"
 
-  check "system pod triggered gpu-cr staging" grep -q 'gpu-cr: staged checkpoint' "$OUTDIR/dispatch.log"
-  check "application pod hit CRImportCheckpointFromPath" grep -q 'CRImportCheckpointFromPath' "$OUTDIR/dispatch.log"
+  # 'gpu-cr: staged checkpoint' is only printed on SUCCESS. The gate firing at all
+  # shows up earlier as 'gpu-cr: restore annotation detected', so check both:
+  # the gate fired, and the staging completed.
+  check "system pod hit the gpu-cr gate" \
+        grep -q 'gpu-cr: restore annotation detected' "$OUTDIR/dispatch.log"
+  check "system pod actually staged its checkpoint" \
+        grep -q 'gpu-cr: staged checkpoint' "$OUTDIR/dispatch.log"
+  # CRImportCheckpointFromPath is a function name CRI-O never logs at info level.
+  # What identifies the application path is the container being created for that
+  # pod with no gpu-cr line attached to it.
+  check "application pod's container was created" \
+        grep -q "Creating container: ${NS}/${APP_POD}/" "$OUTDIR/crio.log"
   grep 'gpu-cr:' "$OUTDIR/dispatch.log" 2>/dev/null | grep "$APP_POD" > "$OUTDIR/crosstalk.txt" 2>/dev/null || true
   check "no gpu-cr staging for the application-mode pod (no crosstalk)" test ! -s "$OUTDIR/crosstalk.txt"
 fi

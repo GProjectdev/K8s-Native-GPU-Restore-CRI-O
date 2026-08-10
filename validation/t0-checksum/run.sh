@@ -6,6 +6,7 @@
 # step (6) remaps data.blob, and the pod resumes with stale GPU memory.
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/common.sh"
 outdir t0-checksum
+register_cleanup t0-cuda-checksum t0-restore
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SINCE="$(date '+%Y-%m-%d %H:%M:%S')"
 announce_journal_hint "$MERGED_NODE" "$SINCE"

@@ -96,6 +96,19 @@ TARGET_NODE=$MERGED_NODE ./t1b-fluidcr-app/run.sh
 ./t2-crossnode-system/run.sh
 ```
 
+### Cleaning up
+
+Every test registers its pods and removes them on exit — success, failed check or
+Ctrl-C alike. A pod left behind in `CreateContainerError` is retried by kubelet
+about every 13 seconds and floods the CRI-O journal, which then corrupts the log
+analysis of whatever runs next.
+
+To clear everything by hand at any point:
+
+```bash
+./99-cleanup.sh
+```
+
 ### Where to run each test
 
 `00-preflight` reads node-local files (`/usr/lib/criu`, `/etc/criu/default.conf`,

@@ -53,7 +53,8 @@ finish() {
     bad "$FAILURES FAILED / $PASSES passed"
   fi
   [ -n "$OUTDIR" ] && info "artifacts: $OUTDIR"
-  exit "$FAILURES"
+  [ -n "$CLEANUP_PODS" ] && info "cleaning up:$CLEANUP_PODS"
+  exit "$FAILURES"    # EXIT trap removes the pods
 }
 
 outdir() { # outdir <test-name>
@@ -73,6 +74,20 @@ announce_journal_hint() { # announce_journal_hint <node> <since>
     echo
   fi
 }
+
+# ---- cleanup -----------------------------------------------------------------
+# Pods must be removed however the script ends -- success, a failed check, Ctrl-C.
+# A pod left in CreateContainerError is retried by kubelet every ~13s and floods
+# the CRI-O journal, which then poisons the next test's log analysis.
+CLEANUP_PODS=""
+register_cleanup() { CLEANUP_PODS="$CLEANUP_PODS $*"; }
+
+cleanup_on_exit() {
+  [ -n "$CLEANUP_PODS" ] || return 0
+  # shellcheck disable=SC2086
+  kubectl -n "$NS" delete pod $CLEANUP_PODS --ignore-not-found --wait=false >/dev/null 2>&1 || true
+}
+trap cleanup_on_exit EXIT INT TERM
 
 # ---- reading artifacts from earlier tests ------------------------------------
 # Never `cat results/*-<test>/<file>`: a rerun leaves several matching dirs and

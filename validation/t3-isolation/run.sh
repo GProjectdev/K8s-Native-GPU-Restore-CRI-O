@@ -4,6 +4,7 @@
 # container creation on error, so a bug there breaks the whole node.
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/common.sh"
 outdir t3-isolation
+register_cleanup t3-plain-gpu
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SINCE="$(date '+%Y-%m-%d %H:%M:%S')"
 announce_journal_hint "$MERGED_NODE" "$SINCE"

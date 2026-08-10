@@ -17,6 +17,7 @@ RESTORE_NODE="${RESTORE_NODE:-$CONTROL_NODE}"
 export SOURCE_POD_UID CKPT_TAR RESTORE_NODE MERGED_NODE NFS_ENDPOINT NFS_PATH
 
 outdir t2-crossnode-system
+register_cleanup t2-restore-crossnode
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SINCE="$(date '+%Y-%m-%d %H:%M:%S')"
 announce_journal_hint "$RESTORE_NODE" "$SINCE"
