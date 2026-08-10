@@ -154,3 +154,14 @@ is active, so its step (5) succeeds and step (6) — the `data.blob` remap — d
 run. The silent-stale-GPU-memory failure mode is therefore **not** in play, and
 earlier restore results stand. The hook is redundant under CRIUgpu but harmless;
 removing it is cleanup, not a fix.
+
+**CDI: settled 2026-08-10.** The `checkpoint_utils.go` guard is load-bearing on
+this cluster, not a no-op. `checkpoint_utils.go` was created upstream by commit
+`4065448 "Integrate with HAMi device plugin and HAMi DRA"`, and its unconditional
+`/dev/nvidia*` skip is correct under HAMi + DRA, where CDI injects the devices.
+This cluster has no HAMi, runs `nvcr.io/nvidia/k8s-device-plugin:v0.16.2` with no
+`DEVICE_LIST_STRATEGY` set (so the default `envvar` strategy), and no CDI wiring
+on the plugin — the CRI request therefore carries no CDI devices. Without the
+guard, the devices recorded in the checkpoint's `dumpSpec` are discarded and
+nothing supplies `/dev/nvidia*` to the restored container. HAMi is not planned,
+so this divergence from upstream is permanent.
