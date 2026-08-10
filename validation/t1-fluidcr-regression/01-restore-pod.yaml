@@ -1,0 +1,25 @@
+# T1 — FluidCR restore. ONLY FluidCR's native annotation. No gpu-cr.io/* at all.
+#
+# This must reach CRImportCheckpointFromPath and behave exactly as it did before
+# the merge. Any difference is a regression introduced by the four GCR patches —
+# most plausibly by the checkpoint_utils.go CDI guard, which is gated on CDI
+# presence rather than on any gpu-cr.io annotation, so FluidCR pods pass through
+# it too.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: t1-fluidcr-restore
+  namespace: default
+  labels: { app: t1-fluidcr-restore }
+  annotations:
+    checkpoint-restore.crio.io/cuda-app: "true"
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ${TARGET_NODE}
+  restartPolicy: Never
+  containers:
+    - name: cuda-app
+      image: ${FLUIDCR_CHECKPOINT_PATH}
+      resources:
+        limits:
+          nvidia.com/gpu: "1"

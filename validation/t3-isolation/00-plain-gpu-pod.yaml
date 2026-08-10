@@ -1,0 +1,27 @@
+# T3 — isolation. A perfectly ordinary GPU Pod: NO checkpoint/restore annotations.
+# stageGPUCheckpoint() runs at the top of EVERY CreateContainer and returns an
+# error on failure, which would abort container creation node-wide. This pod
+# proves the merged binary leaves normal workloads untouched.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: t3-plain-gpu
+  namespace: default
+  labels: { app: t3-plain-gpu }
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ${MERGED_NODE}
+  restartPolicy: Never
+  containers:
+    - name: cuda-app
+      image: pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+      command: ["python", "-c"]
+      args:
+        - |
+          import torch
+          assert torch.cuda.is_available(), "CUDA not available"
+          x = torch.randn(1024, 1024, device='cuda')
+          print("PLAIN_OK", x.sum().item(), flush=True)
+      resources:
+        limits:
+          nvidia.com/gpu: "1"

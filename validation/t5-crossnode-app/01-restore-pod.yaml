@@ -1,0 +1,31 @@
+# T5 — CROSS-NODE application-level restore.
+#
+# This is the "Functional Extension" claim in the progress report: FluidCR's own
+# restore path was same-node only; change #4 (app-payload-uri staging in
+# container_restore.go) is what is supposed to lift that limitation.
+#
+# Two annotations, two jobs:
+#   checkpoint-restore.crio.io/<container>  -> pick FluidCR's entry point
+#   gpu-cr.io/app-payload-uri               -> tell the merged CRI-O to stage the
+#                                              FluidCR payload from a URI the
+#                                              TARGET node can reach
+apiVersion: v1
+kind: Pod
+metadata:
+  name: t5-app-restore-crossnode
+  namespace: default
+  labels: { app: t5-app-restore-crossnode }
+  annotations:
+    checkpoint-restore.crio.io/cuda-app: "true"
+    gpu-cr.io/app-payload-uri: "nfs://${NFS_ENDPOINT}${NFS_PATH}/fluidcr/${APP_PAYLOAD}"
+    gpu-cr.io/source-node: "${SOURCE_NODE}"
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ${RESTORE_NODE}
+  restartPolicy: Never
+  containers:
+    - name: cuda-app
+      image: ${FLUIDCR_IMAGE}
+      resources:
+        limits:
+          nvidia.com/gpu: "1"

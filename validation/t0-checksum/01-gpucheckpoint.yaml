@@ -1,0 +1,16 @@
+# T0 — checkpoint request handled by repo A's GPU C/R Node Agent.
+apiVersion: gpu-cr.io/v1alpha1
+kind: GPUCheckpoint
+metadata:
+  name: t0-ckpt
+  namespace: default
+spec:
+  workloadRef:
+    kind: Pod
+    namespace: default
+    name: t0-cuda-checksum
+    container: cuda-app
+  storage:
+    type: hostPath
+    path: /var/lib/gcr-checkpoint
+  schedule: ""
