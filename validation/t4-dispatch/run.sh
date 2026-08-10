@@ -42,15 +42,21 @@ check "the system-mode tar exists on $MERGED_NODE" \
 SINCE="$(date '+%Y-%m-%d %H:%M:%S')"
 announce_journal_hint "$MERGED_NODE" "$SINCE"
 
-step "1/3  system-mode pod"
+step "1/3  system-mode pod (gpu-cr.io/restore)"
 kubectl -n "$NS" delete pod t0-restore t1a-native-restore t1b-fluidcr-restore --ignore-not-found --wait=true >/dev/null 2>&1 || true
-render_manifest "$ROOT/t0-checksum/02-restore-pod.yaml" | kubectl apply -f -
+render_manifest "$ROOT/t0-checksum/02-restore-pod.yaml" | tee "$OUTDIR/system-pod.yaml" | kubectl apply -f -
 check "system-mode restore Running" wait_pod_phase t0-restore Running
+kubectl -n "$NS" logs t0-restore > "$OUTDIR/system-pod.log" 2>&1 || true
 
-step "2/3  application-mode pod, same node, right after"
+# Free the GPU before the second pod. One GPU per node here.
+info "releasing the GPU for the application-mode pod"
+kubectl -n "$NS" delete pod t0-restore --ignore-not-found --wait=true >/dev/null 2>&1 || true
+
+step "2/3  application-mode pod (checkpoint-restore.crio.io), same binary"
 info "application-mode pod = $APP_POD  (manifest: $APP_MANIFEST)"
-render_manifest "$ROOT/$APP_MANIFEST" | kubectl apply -f -
+render_manifest "$ROOT/$APP_MANIFEST" | tee "$OUTDIR/app-pod.yaml" | kubectl apply -f -
 check "application-mode restore Running" wait_pod_phase "$APP_POD" Running
+kubectl -n "$NS" logs "$APP_POD" > "$OUTDIR/app-pod.log" 2>&1 || true
 
 step "3/3  log separation"
 node_journal "$MERGED_NODE" "$SINCE" "$OUTDIR/crio.log"

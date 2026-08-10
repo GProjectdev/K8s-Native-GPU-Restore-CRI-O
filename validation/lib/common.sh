@@ -131,13 +131,28 @@ require_single_token() {  # require_single_token <name> <value>
 
 # ---- kube helpers -------------------------------------------------------------
 wait_pod_phase() { # wait_pod_phase <pod> <phase> [timeout]
-  local pod="$1" want="$2" t="${3:-$TIMEOUT}" i=0 cur=
+  local pod="$1" want="$2" t="${3:-$TIMEOUT}" i=0 cur= reason=
   while [ "$i" -lt "$t" ]; do
     cur="$(kubectl -n "$NS" get pod "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
     [ "$cur" = "$want" ] && return 0
     [ "$cur" = "Failed" ] && return 1
+    # Unschedulable is terminal in practice -- usually the single GPU on the node
+    # is already taken. Waiting out the full timeout teaches nothing.
+    if [ "$cur" = "Pending" ] && [ "$i" -ge 20 ]; then
+      reason="$(kubectl -n "$NS" get pod "$pod" \
+        -o jsonpath='{.status.conditions[?(@.type=="PodScheduled")].reason}' 2>/dev/null || true)"
+      if [ "$reason" = "Unschedulable" ]; then
+        bad "$pod is Unschedulable:"
+        kubectl -n "$NS" get pod "$pod" \
+          -o jsonpath='{.status.conditions[?(@.type=="PodScheduled")].message}{"\n"}' 2>/dev/null | sed 's/^/       /'
+        warn "  these nodes have one GPU; two pods requesting nvidia.com/gpu cannot"
+        warn "  run at the same time. Free the other pod first."
+        return 1
+      fi
+    fi
     sleep 2; i=$((i+2))
   done
+  bad "timeout waiting for $pod to reach $want (last phase: ${cur:-<none>})"
   return 1
 }
 
