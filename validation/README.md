@@ -108,8 +108,27 @@ export CHECKSUM_BEFORE=$(cat results/*-t0-checksum/checksum.before)
 APP_PAYLOAD=appckpt-1 ./t5-crossnode-app/run.sh
 ```
 
-Scripts run on the merged node, or anywhere with `kubectl` plus passwordless
-`ssh` to the nodes (`node_journal` needs it to pull `journalctl -u crio`).
+### Where to run each test
+
+`00-preflight` reads node-local files (`/usr/lib/criu`, `/etc/criu/default.conf`,
+`crio config`, systemd) — run it **on the merged node**.
+
+Every other test needs two things: `kubectl` to drive pods, and
+`journalctl -u crio` **from the node under test**. On this cluster `kubectl` lives
+on `jsj-master`, so:
+
+```bash
+# once, on jsj-master
+ssh-copy-id root@jsj-worker-1
+ssh-copy-id root@jsj-worker-2        # only needed for the cross-node tests
+```
+
+then run the tests from `jsj-master`. `node_journal` uses local `journalctl` when
+the hostname matches the target node and `ssh` otherwise.
+
+Without that ssh access the journal comes back empty. `require_journal` catches
+this and fails the affected checks explicitly — an empty log must never read as
+"the bad log line is absent".
 
 Everything lands under `validation/results/<timestamp>-<test>/`: rendered
 manifests, pod logs, CRI-O journal slices, checksums. `results/` is gitignored —

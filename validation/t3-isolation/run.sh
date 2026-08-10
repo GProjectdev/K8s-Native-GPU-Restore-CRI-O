@@ -18,10 +18,12 @@ kubectl -n "$NS" logs t3-plain-gpu > "$OUTDIR/pod.log" 2>&1 || true
 
 step "3/3  CRI-O must not have taken the gpu-cr path"
 node_journal "$MERGED_NODE" "$SINCE" "$OUTDIR/crio.log"
-check "no 'gpu-cr:' lines for a pod without annotations" \
-      not grep -q 'gpu-cr:' "$OUTDIR/crio.log"
-check "no checkpoint-archive detection triggered" \
-      not grep -q 'Assuming it is a checkpoint archive' "$OUTDIR/crio.log"
+if require_journal "$OUTDIR/crio.log" "$MERGED_NODE"; then
+  check "no 'gpu-cr:' lines for a pod without annotations" \
+        not grep -q 'gpu-cr:' "$OUTDIR/crio.log"
+  check "no checkpoint-archive detection triggered" \
+        not grep -q 'Assuming it is a checkpoint archive' "$OUTDIR/crio.log"
+fi
 
 kubectl -n "$NS" delete pod t3-plain-gpu --ignore-not-found >/dev/null 2>&1 || true
 finish

@@ -38,10 +38,12 @@ check "/dev/nvidia0 present (this is what the CDI guard decides)" grep -q '/dev/
 
 step "4/4  runtime logs"
 node_journal "$TARGET_NODE" "$SINCE" "$OUTDIR/crio.log"
-check "took the FluidCR entry point" grep -q 'CRImportCheckpointFromPath' "$OUTDIR/crio.log"
-check "no gpu-cr staging for a FluidCR-only pod" not grep -q 'gpu-cr:' "$OUTDIR/crio.log"
-grep -iE 'ext-mount-map|mount.*error|criu.*(error|fail)' "$OUTDIR/crio.log" > "$OUTDIR/mount-warnings.txt" 2>/dev/null || true
-check "no ext-mount-map / CRIU mount warnings (probes change #5)" test ! -s "$OUTDIR/mount-warnings.txt"
+if require_journal "$OUTDIR/crio.log" "$TARGET_NODE"; then
+  check "took the FluidCR entry point" grep -q 'CRImportCheckpointFromPath' "$OUTDIR/crio.log"
+  check "no gpu-cr staging for a FluidCR-only pod" not grep -q 'gpu-cr:' "$OUTDIR/crio.log"
+  grep -iE 'ext-mount-map|mount.*error|criu.*(error|fail)' "$OUTDIR/crio.log" > "$OUTDIR/mount-warnings.txt" 2>/dev/null || true
+  check "no ext-mount-map / CRIU mount warnings (probes change #5)" test ! -s "$OUTDIR/mount-warnings.txt"
+fi
 
 kubectl -n "$NS" delete pod t1-fluidcr-restore --ignore-not-found >/dev/null 2>&1 || true
 finish

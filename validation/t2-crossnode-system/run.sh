@@ -30,8 +30,10 @@ check "pod actually landed on $RESTORE_NODE" test "$(pod_node t2-restore-crossno
 
 step "3/4  staging really happened on the target node"
 node_journal "$RESTORE_NODE" "$SINCE" "$OUTDIR/crio.log"
-check "target node staged the checkpoint" grep -q 'gpu-cr: staged checkpoint' "$OUTDIR/crio.log"
-check "staged from an nfs:// URI" grep -q 'nfs://' "$OUTDIR/crio.log"
+if require_journal "$OUTDIR/crio.log" "$RESTORE_NODE"; then
+  check "target node staged the checkpoint" grep -q 'gpu-cr: staged checkpoint' "$OUTDIR/crio.log"
+  check "staged from an nfs:// URI" grep -q 'nfs://' "$OUTDIR/crio.log"
+fi
 
 step "4/4  value correctness"
 sleep 40

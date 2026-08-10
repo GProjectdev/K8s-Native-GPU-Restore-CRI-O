@@ -105,4 +105,15 @@ node_journal() { # node_journal <node> <since> <outfile>
   fi
 }
 
+# require_journal <file> <node>
+#   An EMPTY journal must not read as "the bad log line is absent". Guard every
+#   log-based check with this.
+require_journal() {
+  [ -s "$1" ] && return 0
+  fail "no CRI-O journal collected from $2 - log-based checks cannot be evaluated"
+  warn "  either run this suite on $2, or enable passwordless ssh to it:"
+  warn "    ssh-copy-id root@$2"
+  return 1
+}
+
 render_manifest() { envsubst < "$1"; }

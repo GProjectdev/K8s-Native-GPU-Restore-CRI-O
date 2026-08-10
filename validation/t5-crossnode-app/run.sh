@@ -30,8 +30,10 @@ kubectl -n "$NS" logs t5-app-restore-crossnode > "$OUTDIR/restore-pod.log" 2>&1 
 
 step "3/3  runtime behaviour"
 node_journal "$RESTORE_NODE" "$SINCE" "$OUTDIR/crio.log"
-check "took FluidCR's entry point (not the GCR one)" grep -q 'CRImportCheckpointFromPath' "$OUTDIR/crio.log"
-check "payload was staged onto the target node" grep -qE 'app-payload-uri|staged' "$OUTDIR/crio.log"
+if require_journal "$OUTDIR/crio.log" "$RESTORE_NODE"; then
+  check "took FluidCR's entry point (not the GCR one)" grep -q 'CRImportCheckpointFromPath' "$OUTDIR/crio.log"
+  check "payload was staged onto the target node" grep -qE 'app-payload-uri|staged' "$OUTDIR/crio.log"
+fi
 
 warn "final proof is training state: confirm the run resumes from the checkpointed"
 warn "step/loss rather than from scratch. Record it under $OUTDIR/."

@@ -25,13 +25,15 @@ check "application-mode restore Running" wait_pod_phase t1-fluidcr-restore Runni
 
 step "3/3  log separation"
 node_journal "$MERGED_NODE" "$SINCE" "$OUTDIR/crio.log"
-grep -E 'CRImportCheckpoint|CRImportCheckpointFromPath|gpu-cr:' "$OUTDIR/crio.log" > "$OUTDIR/dispatch.log" 2>/dev/null || true
-cat "$OUTDIR/dispatch.log"
+if require_journal "$OUTDIR/crio.log" "$MERGED_NODE"; then
+  grep -E 'CRImportCheckpoint|CRImportCheckpointFromPath|gpu-cr:' "$OUTDIR/crio.log" > "$OUTDIR/dispatch.log" 2>/dev/null || true
+  cat "$OUTDIR/dispatch.log"
 
-check "system pod triggered gpu-cr staging" grep -q 'gpu-cr: staged checkpoint' "$OUTDIR/dispatch.log"
-check "application pod hit CRImportCheckpointFromPath" grep -q 'CRImportCheckpointFromPath' "$OUTDIR/dispatch.log"
-grep 'gpu-cr:' "$OUTDIR/dispatch.log" 2>/dev/null | grep 't1-fluidcr-restore' > "$OUTDIR/crosstalk.txt" 2>/dev/null || true
-check "no gpu-cr staging for the application-mode pod (no crosstalk)" test ! -s "$OUTDIR/crosstalk.txt"
+  check "system pod triggered gpu-cr staging" grep -q 'gpu-cr: staged checkpoint' "$OUTDIR/dispatch.log"
+  check "application pod hit CRImportCheckpointFromPath" grep -q 'CRImportCheckpointFromPath' "$OUTDIR/dispatch.log"
+  grep 'gpu-cr:' "$OUTDIR/dispatch.log" 2>/dev/null | grep 't1-fluidcr-restore' > "$OUTDIR/crosstalk.txt" 2>/dev/null || true
+  check "no gpu-cr staging for the application-mode pod (no crosstalk)" test ! -s "$OUTDIR/crosstalk.txt"
+fi
 
 info "keep $OUTDIR/dispatch.log — this is the figure for the dispatch slide"
 finish

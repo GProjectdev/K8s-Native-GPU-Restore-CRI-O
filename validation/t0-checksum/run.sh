@@ -66,11 +66,13 @@ check "restored pod emitted a CHECKSUM line" test -n "$AFTER"
 check "GPU tensor bytes IDENTICAL before/after restore" test "$BEFORE" = "$AFTER"
 
 node_journal "$MERGED_NODE" "$SINCE" "$OUTDIR/crio.log"
-check "CRI-O logged 'gpu-cr: staged checkpoint'" grep -q 'gpu-cr: staged checkpoint' "$OUTDIR/crio.log"
-check "no 'host helper timeout' (would mean the data.blob remap was skipped)" \
-      not grep -q 'host helper timeout' "$OUTDIR/crio.log"
-grep -q 'interceptor remap ack' "$OUTDIR/crio.log" \
-  && ok "interceptor remap acked" \
-  || warn "no 'interceptor remap ack' — if the checksum still matched, find out what remapped it"
+if require_journal "$OUTDIR/crio.log" "$MERGED_NODE"; then
+  check "CRI-O logged 'gpu-cr: staged checkpoint'" grep -q 'gpu-cr: staged checkpoint' "$OUTDIR/crio.log"
+  check "no 'host helper timeout' (would mean the data.blob remap was skipped)" \
+        not grep -q 'host helper timeout' "$OUTDIR/crio.log"
+  grep -q 'interceptor remap ack' "$OUTDIR/crio.log" \
+    && ok "interceptor remap acked" \
+    || warn "no 'interceptor remap ack' — if the checksum still matched, find out what remapped it"
+fi
 
 finish
