@@ -203,3 +203,13 @@ on the plugin — the CRI request therefore carries no CDI devices. Without the
 guard, the devices recorded in the checkpoint's `dumpSpec` are discarded and
 nothing supplies `/dev/nvidia*` to the restored container. HAMi is not planned,
 so this divergence from upstream is permanent.
+
+**t3-isolation: PASSED 2026-08-10 (jsj-worker-1).** The CRI-O journal shows the
+full container lifecycle for `t3-plain-gpu` — `Creating container` at
+04:44:54.120, `Created container` at 04:44:54.344, `Started container` at
+04:44:54.353 — with no `gpu-cr:` line anywhere between them, and no
+`Assuming it is a checkpoint archive`. Because the window demonstrably contains
+the container's own activity, the absence of the staging lines is evidence, not
+an empty log: `stageGPUCheckpoint`'s annotation gate returns before doing
+anything for a pod that carries no `gpu-cr.io/restore`. This is the measured
+basis for the Mode Isolation claim.

@@ -20,8 +20,15 @@ warn "RESTORE_NODE must ALSO run the merged CRI-O. If it is still the pre-merge 
 
 step "1/4  artifacts on the share"
 info "expected: ${NFS_PATH}/${CKPT_TAR}  and  ${NFS_PATH}/gcr-data/${SOURCE_POD_UID}/"
-check "tar on the share" test -f "${NFS_PATH}/${CKPT_TAR}"
-check "data.blob on the share" test -d "${NFS_PATH}/gcr-data/${SOURCE_POD_UID}"
+if can_reach_node "$RESTORE_NODE"; then
+  check "tar on the share (as seen from $RESTORE_NODE)" \
+        node_run "$RESTORE_NODE" test -f "${NFS_PATH}/${CKPT_TAR}"
+  check "data.blob on the share (as seen from $RESTORE_NODE)" \
+        node_run "$RESTORE_NODE" test -d "${NFS_PATH}/gcr-data/${SOURCE_POD_UID}"
+else
+  fail "cannot reach $RESTORE_NODE — share contents UNVERIFIED"
+  warn "  check on $RESTORE_NODE:  ls -la ${NFS_PATH}/${CKPT_TAR} ${NFS_PATH}/gcr-data/${SOURCE_POD_UID}/"
+fi
 
 step "2/4  restore on the other node"
 kubectl -n "$NS" delete pod t2-restore-crossnode --ignore-not-found --wait=true >/dev/null 2>&1 || true

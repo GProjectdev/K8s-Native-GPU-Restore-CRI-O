@@ -20,7 +20,13 @@ announce_journal_hint "$RESTORE_NODE" "$SINCE"
 info "source = $SOURCE_NODE   restore = $RESTORE_NODE   payload = $APP_PAYLOAD"
 
 step "1/3  payload reachable"
-check "FluidCR payload on the share" test -e "${NFS_PATH}/fluidcr/${APP_PAYLOAD}"
+if can_reach_node "$RESTORE_NODE"; then
+  check "FluidCR payload on the share (as seen from $RESTORE_NODE)" \
+        node_run "$RESTORE_NODE" test -e "${NFS_PATH}/fluidcr/${APP_PAYLOAD}"
+else
+  fail "cannot reach $RESTORE_NODE — payload presence UNVERIFIED"
+  warn "  check on $RESTORE_NODE:  ls -la ${NFS_PATH}/fluidcr/${APP_PAYLOAD}"
+fi
 
 step "2/3  restore on the other node"
 kubectl -n "$NS" delete pod t5-app-restore-crossnode --ignore-not-found --wait=true >/dev/null 2>&1 || true

@@ -48,9 +48,21 @@ CKPT_TAR="$(basename "${CKPT_PATH:-Checkpoint.tar}")"
 export CKPT_TAR
 echo "$CKPT_TAR" > "$OUTDIR/ckpt-tar"
 info "checkpoint tar = $CKPT_TAR  (from .status.lastCheckpointPath=${CKPT_PATH:-<empty>})"
-check "Checkpoint.tar present" test -f "/var/lib/gcr-checkpoint/${CKPT_TAR}"
-check "data.blob dir present (/var/lib/gcr-data/${SOURCE_POD_UID})" test -d "/var/lib/gcr-data/${SOURCE_POD_UID}"
-ls -la /var/lib/gcr-checkpoint "/var/lib/gcr-data/${SOURCE_POD_UID}" > "$OUTDIR/artifacts.txt" 2>&1 || true
+# These paths live on $MERGED_NODE, not wherever this script runs.
+if can_reach_node "$MERGED_NODE"; then
+  check "Checkpoint.tar present on $MERGED_NODE" \
+        node_run "$MERGED_NODE" test -f "/var/lib/gcr-checkpoint/${CKPT_TAR}"
+  check "data.blob dir present on $MERGED_NODE (/var/lib/gcr-data/${SOURCE_POD_UID})" \
+        node_run "$MERGED_NODE" test -d "/var/lib/gcr-data/${SOURCE_POD_UID}"
+  node_run "$MERGED_NODE" ls -la /var/lib/gcr-checkpoint "/var/lib/gcr-data/${SOURCE_POD_UID}" \
+        > "$OUTDIR/artifacts.txt" 2>&1 || true
+else
+  fail "cannot reach $MERGED_NODE — artifact presence UNVERIFIED"
+  warn "  a complete checkpoint is tar + blob; the blob is NOT inside the tar."
+  warn "  verify by hand on $MERGED_NODE:"
+  warn "    ls -la /var/lib/gcr-checkpoint/${CKPT_TAR}"
+  warn "    ls -la /var/lib/gcr-data/${SOURCE_POD_UID}/"
+fi
 
 step "4/5  restore"
 kubectl -n "$NS" delete pod t0-cuda-checksum --ignore-not-found --wait=true >/dev/null 2>&1 || true

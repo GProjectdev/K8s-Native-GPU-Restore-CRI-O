@@ -104,6 +104,24 @@ pod_checksum() {
     | grep -oE 'CHECKSUM [0-9a-f]{64}' | tail -1 | awk '{print $2}' || true
 }
 
+# ---- running commands on a node ----------------------------------------------
+# can_reach_node <node> -> 0 if we are that node, or ssh works
+can_reach_node() {
+  [ "$(hostname)" = "$1" ] && return 0
+  [ "$(hostname -s 2>/dev/null)" = "${1%%.*}" ] && return 0
+  ssh -o BatchMode=yes -o ConnectTimeout=5 "$1" true 2>/dev/null
+}
+
+# node_run <node> <command...> -- locally if we are the node, else over ssh
+node_run() {
+  local node="$1"; shift
+  if [ "$(hostname)" = "$node" ] || [ "$(hostname -s 2>/dev/null)" = "${node%%.*}" ]; then
+    "$@"
+  else
+    ssh -o BatchMode=yes -o ConnectTimeout=5 "$node" "$@"
+  fi
+}
+
 # ---- node-side log capture ----------------------------------------------------
 # Three ways to get the CRI-O journal, tried in order:
 #   1. CRIO_LOG=<file>  — a journal you collected yourself (no ssh needed)
