@@ -29,12 +29,19 @@ Progress Report의 핵심 주장은 하나입니다.
 | `00-preflight` | 노드가 CRIUgpu 구성인가 (전제 확인) | — | ✅ 완료 |
 | `t3-isolation` | annotation 없는 GPU Pod에 staging이 끼어들지 않음 | **D** | ✅ 완료 |
 | `t0-checksum` | system C/R 후 GPU 텐서가 바이트 단위 동일 | **A** | ✅ 완료 |
-| `t1a-native-restore` | 네이티브 복원 경로에서 GPU 디바이스가 살아남음 | **C** (배관) | 미실행 |
+| `t1a-native-restore` | (선택) 네이티브 진입점이 도달 가능한가 — **t1b 실패 시 진단용** | — | 선택 |
 | `t1b-fluidcr-app` | **실제 애플리케이션 레벨 C/R** + 학습 step 재개 | **B** | 미실행 |
 | `t4-dispatch` | 두 Pod가 각자 경로로 가고 교차하지 않음 | **C** (완성) | 미실행 |
 | `t2-crossnode-system` | staging 으로 다른 노드에서 복원 | 추가 | 미실행 |
 
-**현재 A와 D만 채워져 있습니다.** B가 비어 있는 한 "통합"은 절반만 증명된 상태입니다.
+**현재 A와 D가 채워져 있고, C의 상당 부분도 t0 가 이미 증명했습니다.**
+
+`t0-checksum` 은 `CRImportCheckpoint` → `buildContainerConfig` 를 통과했고, 그 안에
+②CDI 가드가 있습니다. **체크섬이 맞았다는 것 자체가 GPU 디바이스가 정상 주입됐다는
+증거**입니다 — 디바이스가 없었다면 `remap: 4 segs ... 0 failed` 이 나올 수 없습니다.
+
+따라서 남은 것은 **B (t1b)** 와 **C 의 나머지 — 두 진입점이 실제로 공존하고 교차하지
+않는가 (t4)** 둘뿐입니다.
 
 ---
 
@@ -42,7 +49,7 @@ Progress Report의 핵심 주장은 하나입니다.
 
 이 구분이 이 문서의 핵심입니다.
 
-### t1a — CRI-O 배관 검사
+### t1a — 진단용 (필수 아님)
 
 평범한 CUDA 컨테이너를 kubelet checkpoint API 로 뜨고,
 `checkpoint-restore.crio.io/<container>` 로 복원한다.
@@ -53,7 +60,14 @@ Progress Report의 핵심 주장은 하나입니다.
 | **증명하지 못하는 것** | **애플리케이션 레벨 체크포인트는 일어나지 않는다.** `state_dict` 도, SIGUSR1 도, launcher 도 없다. CRIU 가 컨테이너를 통째로 뜬 것뿐이고 애플리케이션은 자기가 체크포인트된 줄도 모른다 |
 | 비용 | 낮음. FluidCR·`leehun-criu` 불필요 |
 
-**t1a 는 조각 B 를 채우지 않습니다.** C 의 절반(배관)만 채웁니다.
+**t1a 는 필수가 아닙니다.** `buildContainerConfig` 의 디바이스 처리는 t0 가 이미
+통과시켰고(호출자만 다를 뿐 가드는 `GetCDIDevices()` 만 보므로 동작이 동일),
+"두 번째 진입점이 도달 가능한가" 는 t4 가 확인합니다.
+
+남겨두는 이유는 하나뿐입니다 — **t1b 가 실패했을 때 원인을 가르는 대조군**.
+
+- t1a 통과 + t1b 실패 → CRI-O 배관은 멀쩡. FluidCR 쪽 문제 (스톡 CRIU 등)
+- t1a 실패 → 배관부터 깨져 있음. t1b 는 볼 것도 없음
 
 ### t1b — 실제 애플리케이션 레벨 C/R
 
@@ -134,17 +148,15 @@ FluidCR 이 `enumerate()` 를 patch 하므로, 복원 후에도 **같은 step �
 
 ```
 (완료) 00-preflight  →  t3-isolation  →  t0-checksum
-(다음)  t1a-native-restore     ← 싸고 빠름. C 배관 확인
-        t1b-fluidcr-app        ← B. 발표 주장에 필요한 것
-        t4-dispatch            ← C 완성. t1a 또는 t1b 산출물 사용
+(다음)  t1b-fluidcr-app        ← B. 유일하게 비어 있는 조각
+        t4-dispatch            ← C 완성. t1b 산출물 사용
         t2-crossnode-system    ← 추가 기여
+
+(선택)  t1a-native-restore     ← t1b 가 실패했을 때만
 ```
 
-t1a 를 먼저 하는 이유는 단순합니다. 싸고, t1b 가 실패했을 때 **원인이 CRI-O 배관인지
-FluidCR 자체인지 가르는 대조군**이 되기 때문입니다.
-
-- t1a 통과 + t1b 실패 → CRI-O 는 멀쩡. FluidCR 쪽 문제 (스톡 CRIU 등)
-- t1a 실패 → 배관부터 깨져 있음. t1b 는 볼 것도 없음
+**t4 는 t1b 의 체크포인트를 쓰는 것이 중요합니다.** t1a 것을 쓰면 t4 가 증명하는 것이
+"CRI-O 진입점 두 개" 로 약해지고, t1b 것을 쓰면 **"모드 두 개"** 가 됩니다.
 
 ---
 

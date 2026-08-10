@@ -17,7 +17,7 @@ has actually been measured.
 | `00-preflight` | the node is really running CRIUgpu | partly checked by hand |
 | `t3-isolation` | Mode Isolation — normal workloads unaffected | never run |
 | `t0-checksum` | restore is *correct*, not just successful | never run |
-| `t1a-native-restore` | CRI-O's native restore path survived the merge (plumbing only) | never run |
+| `t1a-native-restore` | *(optional)* is the native entry point reachable — diagnostic if t1b fails | optional |
 | `t1b-fluidcr-app` | **application-level C/R actually happens** — the other half of "both modes" | never run |
 | `t4-dispatch` | Engineering Integration — both paths coexist | system side only |
 | `t2-crossnode-system` | staging does what it exists for | **likely never run** — every sample used node-local `hostpath://` |
@@ -30,9 +30,9 @@ Dependencies matter. Run top to bottom.
 00-preflight          # no cluster changes; do this first
 t3-isolation          # cheapest smoke test
 t0-checksum           # produces the artifacts + baseline checksum for t2/t4
-t1a-native-restore    # cheap; also the control for t1b
-t1b-fluidcr-app       # the real application-level test
-t4-dispatch           # needs t0 + t1 artifacts
+t1b-fluidcr-app       # the real application-level test — the only empty piece
+t4-dispatch           # uses t1b's checkpoint, so it shows two MODES not two entry points
+(t1a-native-restore)  # only if t1b fails, to tell runtime from FluidCR
 t2-crossnode-system   # needs t0 artifacts on the shared mount
 ```
 
@@ -86,10 +86,9 @@ sudo ./00-preflight/run.sh
 ./t3-isolation/run.sh
 ./t0-checksum/run.sh
 
-TARGET_NODE=$MERGED_NODE ./t1a-native-restore/run.sh
 TARGET_NODE=$MERGED_NODE ./t1b-fluidcr-app/run.sh
 
-export CKPT_PATH=$(cat results/*-t1a-native-*/ckpt-path)
+export CKPT_PATH=$(cat results/*-t1b-fluidcr-*/ckpt-path)
 export SOURCE_POD_UID=$(cat results/*-t0-checksum/source-pod-uid)
 export CHECKSUM_BEFORE=$(cat results/*-t0-checksum/checksum.before)
 ./t4-dispatch/run.sh
