@@ -213,3 +213,43 @@ the container's own activity, the absence of the staging lines is evidence, not
 an empty log: `stageGPUCheckpoint`'s annotation gate returns before doing
 anything for a pod that carries no `gpu-cr.io/restore`. This is the measured
 basis for the Mode Isolation claim.
+
+**t0-checksum: PASSED 2026-08-10 (jsj-worker-1).** A 512 MiB deterministic GPU
+tensor came back byte-identical across checkpoint and restore:
+`2b51062eef45e93b7571a47a0196b8f3fcabc7644e8c06516197794e42b8856b` before and
+after. This is the first evidence that the system-level path restores the
+*value*, not merely that the container reaches Running.
+
+The restored pod's log is the real artifact:
+
+```
+[gcr] interceptor loaded (pid=1) ... [VMM hooks active]
+[gcr][vmm-alloc] x4   req=536870912
+READY gpu_alloc bytes=536870912
+CHECKSUM 2b51062e...
+[gcr] checkpoint signal received
+[gcr][engine] freeze: 4 segs, 2147483648 bytes -> external blob
+              (unmapped before checkpoint; excluded from CRIU tar); physical released (VA kept)
+[gcr] restore signal received
+[gcr][engine] remap: 4 segs restored from external blob to same VA + H2D; 0 failed
+CHECKSUM 2b51062e...
+```
+
+Two things to read from it. First, CRI-O restores the container's log along with
+the process, so the pre-checkpoint lines are expected to be present — their being
+there is not evidence of a re-run. What rules a re-run out is that
+`interceptor loaded` and the four `vmm-alloc` lines appear exactly **once**: one
+continuous process lifetime, not two. Second, `remap: 4 segs restored ... to same
+VA + H2D; 0 failed` is the design's central claim measured directly — the virtual
+addresses were never released, so the buffers land back where the process still
+expects them. 4 x 512 MiB matches PyTorch's caching allocator holding the
+`arange`/`sin`/`cos`/result blocks.
+
+The remap ACK is emitted by the in-Pod interceptor, so it appears in the pod log,
+not the CRI-O journal — an earlier version of this suite looked for it in the
+journal and warned spuriously.
+
+Caveat for a future round: the tensor is deterministic (`sin`/`cos` of an index
+range), so in principle a re-run would recompute the same digest. The log shape
+rules that out here, but seeding the tensor with something unreproducible (the
+pod UID, or an unseeded `randn`) would close the hole by construction.

@@ -81,14 +81,30 @@ info "checksum(after)  = ${AFTER:-<none>}"
 check "restored pod emitted a CHECKSUM line" test -n "$AFTER"
 check "GPU tensor bytes IDENTICAL before/after restore" test "$BEFORE" = "$AFTER"
 
+# A matching checksum alone is not proof: if the workload had simply re-run from
+# scratch it would recompute the same deterministic tensor. What rules that out
+# is the SHAPE of the restored container's log.
+#
+# CRI-O restores the container's log along with the process, so the pre-checkpoint
+# lines (interceptor init, vmm-alloc, READY) are EXPECTED to be present. A re-run
+# would show them TWICE. One lifecycle = genuine restore.
+check "interceptor initialised exactly once (no re-execution)" \
+      test "$(grep -c 'interceptor loaded' "$OUTDIR/restore-pod.log" 2>/dev/null || echo 0)" = "1"
+check "interceptor froze the GPU buffers out to the external blob" \
+      grep -q 'engine..freeze:' "$OUTDIR/restore-pod.log"
+check "interceptor remapped them back to the same VA with 0 failures" \
+      grep -qE 'engine..remap:.*0 failed' "$OUTDIR/restore-pod.log"
+check "two CHECKSUM lines — one before the freeze, one after the remap" \
+      test "$(grep -c 'CHECKSUM ' "$OUTDIR/restore-pod.log" 2>/dev/null || echo 0)" -ge 2
+grep -E 'engine..(freeze|remap):' "$OUTDIR/restore-pod.log" > "$OUTDIR/gcr-engine.log" 2>/dev/null || true
+
 node_journal "$MERGED_NODE" "$SINCE" "$OUTDIR/crio.log"
 if require_journal "$OUTDIR/crio.log" "$MERGED_NODE"; then
   check "CRI-O logged 'gpu-cr: staged checkpoint'" grep -q 'gpu-cr: staged checkpoint' "$OUTDIR/crio.log"
   check "no 'host helper timeout' (would mean the data.blob remap was skipped)" \
         not grep -q 'host helper timeout' "$OUTDIR/crio.log"
-  grep -q 'interceptor remap ack' "$OUTDIR/crio.log" \
-    && ok "interceptor remap acked" \
-    || warn "no 'interceptor remap ack' — if the checksum still matched, find out what remapped it"
+  # The remap ACK is emitted by the in-Pod interceptor, not by CRI-O, so it lives
+  # in the pod log (checked above) rather than the journal. Nothing to assert here.
 fi
 
 finish
