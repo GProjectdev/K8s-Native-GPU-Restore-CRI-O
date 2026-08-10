@@ -130,3 +130,27 @@ keeping for the report:
 - Multi-GPU and multi-process (NCCL) workloads — single container, single GPU only
 - The CR / controller / webhook layer, which is still design-only
 - Checkpoint-side performance (repo A's `benchmark/` covers that)
+
+## Cluster-specific notes (jsj cluster)
+
+**`tcp-close` is deliberately absent from `/etc/criu/default.conf`.** Keeping it
+would close live TCP connections at dump time, which breaks restore of a
+long-running inference service. The cost is that a checkpoint taken while any
+TCP connection is ESTABLISHED fails with `-52 "Connected TCP socket"`;
+listening-only sockets are unaffected. None of the workloads in this suite open
+sockets, so it does not affect these tests.
+
+Repo A's `quickstart/scripts/gpu-worker-setup.sh` writes `tcp-close` into that
+file. Re-running quickstart, or rebuilding a node from it, silently reintroduces
+it — check the file afterwards.
+
+**Preflight result 2026-08-10 (jsj-worker-1):** 7 passed, 1 informational
+(`tcp-close`, above). CRIUgpu toolchain confirmed — `cuda_plugin.so`,
+CRIU 4.2.1, crun 1.26 `+CRIU`, `criu-device-restorer.sh` installed,
+`enable_criu_support = true`.
+
+The leftover v1.0 poststart hook is installed *and* `gpu-cr-cuda-helper.service`
+is active, so its step (5) succeeds and step (6) — the `data.blob` remap — does
+run. The silent-stale-GPU-memory failure mode is therefore **not** in play, and
+earlier restore results stand. The hook is redundant under CRIUgpu but harmless;
+removing it is cleanup, not a fix.

@@ -19,8 +19,21 @@ check "crun built with +CRIU" grep -q '+CRIU' "$OUTDIR/crun.txt"
 
 step "2/5  CRIU options"
 cp /etc/criu/default.conf "$OUTDIR/criu-default.conf" 2>/dev/null || true
-check "tcp-close in /etc/criu/default.conf" grep -q 'tcp-close' /etc/criu/default.conf
 [ -f /etc/criu/default.conf ] && info "current: $(tr '\n' ' ' < /etc/criu/default.conf)"
+# NOT a pass/fail. tcp-close is a deliberate trade-off on this cluster:
+#   present -> dumps with live TCP connections succeed, but the connections are
+#              CLOSED, which breaks restore of a long-lived inference service
+#   absent  -> connections survive the round trip, but a dump taken while any
+#              TCP connection is ESTABLISHED fails with -52 "Connected TCP socket"
+# It is intentionally absent here. Listening-only sockets dump fine either way.
+if grep -q 'tcp-close' /etc/criu/default.conf 2>/dev/null; then
+  info "tcp-close IS set -> live TCP connections are closed at dump time"
+  warn "  inference services will not survive the round trip with their connections"
+else
+  info "tcp-close is NOT set (intentional: keeps inference-service connections intact)"
+  warn "  a checkpoint taken while a TCP connection is ESTABLISHED will fail with -52"
+  warn "  repo A's quickstart/gpu-worker-setup.sh re-adds tcp-close; do not let it"
+fi
 
 step "3/5  v1.0 leftovers"
 HOOK=/usr/local/lib/gpu-cr-restore/oci-hooks/gpu-cr-restore.json
@@ -43,14 +56,31 @@ crio config 2>/dev/null | grep -A6 hooks_dir > "$OUTDIR/hooks_dir.txt" || true
 ls -l /etc/crio/crio.conf.d/ > "$OUTDIR/crio-dropins.txt" 2>&1 || true
 
 step "4/5  CDI"
+# The checkpoint_utils.go guard turns on len(createConfig.GetCDIDevices()) > 0,
+# i.e. on the CRI CreateContainerRequest field -- NOT on whether CDI specs merely
+# exist on the node. Those are different questions, so report both.
 { nvidia-ctk cdi list 2>&1 || echo "(nvidia-ctk unavailable)"; ls /etc/cdi/ /var/run/cdi/ 2>&1; } \
-  > "$OUTDIR/cdi.txt"
-if grep -qE 'nvidia\.com/gpu=' "$OUTDIR/cdi.txt"; then
-  info "CDI IS in use -> the checkpoint_utils.go guard is a no-op here"
+  > "$OUTDIR/cdi-specs.txt"
+if grep -qE 'nvidia\.com/gpu=' "$OUTDIR/cdi-specs.txt"; then
+  info "CDI specs ARE registered on this node"
 else
-  info "CDI NOT in use -> the guard is LOAD-BEARING:"
-  info "  /dev/nvidia* comes from the checkpoint's dumpSpec, nothing else supplies it"
+  info "no CDI specs registered on this node"
 fi
+
+# Decisive: which strategy the device plugin uses.
+#   cdi-cri         -> CDIDevices populated  -> the guard is a NO-OP here
+#   cdi-annotations -> may be empty          -> the guard is LOAD-BEARING
+#   envvar/volume-mounts -> empty            -> the guard is LOAD-BEARING
+kubectl -n kube-system get ds -o yaml 2>/dev/null \
+  | grep -i -A3 'DEVICE_LIST_STRATEGY' > "$OUTDIR/device-list-strategy.txt" || true
+if [ -s "$OUTDIR/device-list-strategy.txt" ]; then
+  info "DEVICE_LIST_STRATEGY:"; sed 's/^/       /' "$OUTDIR/device-list-strategy.txt"
+else
+  warn "DEVICE_LIST_STRATEGY not found (kubectl unavailable here, or plugin uses defaults)"
+  warn "  run on the control plane:"
+  warn "    kubectl -n kube-system get ds -o yaml | grep -i -A3 DEVICE_LIST_STRATEGY"
+fi
+info "whether the CDI guard does anything on THIS cluster follows from the above"
 
 step "5/5  CRI-O"
 crio config 2>/dev/null > "$OUTDIR/crio-config.txt" || true
