@@ -1,0 +1,25 @@
+# ServiceAccount allowed to call the kubelet checkpoint API directly.
+# Needed only to take the checkpoint by hand; the GCR Node Agent has its own.
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: checkpoint-sa, namespace: default }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: { name: checkpoint-caller }
+rules:
+  - apiGroups: [""]
+    resources: ["nodes/checkpoint"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: { name: checkpoint-caller }
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: checkpoint-caller
+subjects:
+  - kind: ServiceAccount
+    name: checkpoint-sa
+    namespace: default

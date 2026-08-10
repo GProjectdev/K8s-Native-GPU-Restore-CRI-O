@@ -1,0 +1,37 @@
+# T1 — a plain GPU container. No GCR interceptor, no FluidCR, no gpu-cr.io
+# annotations. Just something with /dev/nvidia* that CRI-O can checkpoint.
+#
+# The point is the RESTORE path: checkpoint-restore.crio.io/<container> drives
+# CRImportCheckpointFromPath -> buildContainerConfig, which is where the CDI
+# guard lives. If that guard is wrong, the restored container comes back without
+# its GPU devices.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: t1-native-src
+  namespace: default
+  labels: { app: t1-native-src }
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ${TARGET_NODE}
+  restartPolicy: Never
+  containers:
+    - name: gpu-app
+      image: pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+      command: ["python", "-u", "-c"]
+      args:
+        - |
+          import torch, os, time, glob
+          assert torch.cuda.is_available(), "CUDA not available"
+          x = torch.arange(1024, dtype=torch.float32, device='cuda')
+          print("DEVNODES", sorted(glob.glob('/dev/nvidia*')), flush=True)
+          print("GPUNAME", torch.cuda.get_device_name(0), flush=True)
+          print("SUM %.4f" % x.sum().item(), flush=True)
+          print("MARKER alive", flush=True)
+          n = 0
+          while True:
+              time.sleep(10); n += 1
+              print("TICK %d" % n, flush=True)
+      resources:
+        limits:
+          nvidia.com/gpu: "1"

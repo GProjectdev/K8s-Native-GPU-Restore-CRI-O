@@ -17,10 +17,9 @@ has actually been measured.
 | `00-preflight` | the node is really running CRIUgpu | partly checked by hand |
 | `t3-isolation` | Mode Isolation — normal workloads unaffected | never run |
 | `t0-checksum` | restore is *correct*, not just successful | never run |
-| `t1-fluidcr-regression` | Mode Isolation — FluidCR path survived the merge | never run |
+| `t1-native-restore` | Mode Isolation — CRI-O's native restore path survived the merge | never run |
 | `t4-dispatch` | Engineering Integration — both paths coexist | system side only |
 | `t2-crossnode-system` | staging does what it exists for | **likely never run** — every sample used node-local `hostpath://` |
-| `t5-crossnode-app` | Functional Extension — FluidCR gains cross-node restore | never run; the code change behind it has not been reviewed either |
 
 ## Order
 
@@ -30,10 +29,9 @@ Dependencies matter. Run top to bottom.
 00-preflight          # no cluster changes; do this first
 t3-isolation          # cheapest smoke test
 t0-checksum           # produces the artifacts + baseline checksum for t2/t4
-t1-fluidcr-regression # run TWICE: merged node, then pre-merge control node
+t1-native-restore     # run TWICE: pre-merge control node, then merged node
 t4-dispatch           # needs t0 + t1 artifacts
 t2-crossnode-system   # needs t0 artifacts on the shared mount
-t5-crossnode-app      # needs the FluidCR payload on the shared mount
 ```
 
 ## Before anything
@@ -253,3 +251,31 @@ Caveat for a future round: the tensor is deterministic (`sin`/`cos` of an index
 range), so in principle a re-run would recompute the same digest. The log shape
 rules that out here, but seeding the tensor with something unreproducible (the
 pod UID, or an unseeded `randn`) would close the hole by construction.
+
+## Why t1 does not need FluidCR
+
+Of the four merged changes, only the CDI guard in `checkpoint_utils.go` can
+affect the application-level path, and it sits in `buildContainerConfig()` —
+which `CRImportCheckpoint` (GCR) and `CRImportCheckpointFromPath` (native) both
+call. `CRImportCheckpointFromPath` is CRI-O functionality; FluidCR uses it, but
+does not provide it. The annotation `checkpoint-restore.crio.io/<container>` is
+CRI-O's own convention, and its value is the checkpoint tar path on the node.
+
+So the regression question reduces to something a plain CUDA container can
+answer: **after a native restore, does the container still have `/dev/nvidia*`?**
+That is exactly what the guard decides. No FluidCR image, no `leehun-criu`, no
+GPT-2 XL.
+
+This also sidesteps a real obstacle: FluidCR requires the `leehun-criu` fork
+(branch `2026-01-26/gpu-migration-support`), and this cluster runs stock
+`criu 4.2.1-1ppa1.22.04` from the Ubuntu PPA. Whether FluidCR's own path has
+ever worked here is a separate, open question.
+
+## Out of scope
+
+**Cross-node application-level restore.** FluidCR's launcher buffers the
+application checkpoint into RAM so CRIU carries it inside the container tar
+("*buffers the checkpoint file into RAM so CRIU can carry it across nodes*" —
+upstream README). The tar is self-contained, so cross-node restore is upstream
+behaviour rather than something this work adds. It is future development, not a
+validation item.
