@@ -1,0 +1,41 @@
+# T1b — a plain PyTorch loop. Deliberately contains NO FluidCR references:
+# FluidCR patches builtins.enumerate() so the DataLoader resumes at the right
+# step after a restore, and that transparency is the property under test.
+#
+# The step number is what we judge on. After restore the loop must continue from
+# the checkpointed step, not from epoch 0 step 0.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: t1b-train-script
+  namespace: default
+data:
+  train.py: |
+    import torch, torch.nn as nn, time
+    from torch.utils.data import DataLoader, Dataset
+
+    torch.manual_seed(0)
+    device = torch.device("cuda")
+    print("DEVICE", torch.cuda.get_device_name(0), flush=True)
+
+    class RandomDataset(Dataset):
+        def __init__(self, n=200000, dim=128): self.n, self.dim = n, dim
+        def __len__(self): return self.n
+        def __getitem__(self, _):
+            x = torch.randn(self.dim); return x, x.sum().unsqueeze(0)
+
+    model = nn.Sequential(nn.Linear(128,256), nn.ReLU(), nn.Linear(256,1)).to(device)
+    opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+    loss_fn = nn.MSELoss()
+    loader = DataLoader(RandomDataset(), batch_size=64)
+
+    print("TRAINING_START", flush=True)
+    for epoch in range(100):
+        for step, (x, y) in enumerate(loader):
+            x, y = x.to(device), y.to(device)
+            opt.zero_grad()
+            loss = loss_fn(model(x), y)
+            loss.backward(); opt.step()
+            if step % 20 == 0:
+                print("STEP epoch=%d step=%d loss=%.6f" % (epoch, step, loss.item()), flush=True)
+            time.sleep(0.02)   # keep the run long enough to checkpoint by hand

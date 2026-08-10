@@ -17,7 +17,8 @@ has actually been measured.
 | `00-preflight` | the node is really running CRIUgpu | partly checked by hand |
 | `t3-isolation` | Mode Isolation — normal workloads unaffected | never run |
 | `t0-checksum` | restore is *correct*, not just successful | never run |
-| `t1-native-restore` | Mode Isolation — CRI-O's native restore path survived the merge | never run |
+| `t1a-native-restore` | CRI-O's native restore path survived the merge (plumbing only) | never run |
+| `t1b-fluidcr-app` | **application-level C/R actually happens** — the other half of "both modes" | never run |
 | `t4-dispatch` | Engineering Integration — both paths coexist | system side only |
 | `t2-crossnode-system` | staging does what it exists for | **likely never run** — every sample used node-local `hostpath://` |
 
@@ -29,7 +30,8 @@ Dependencies matter. Run top to bottom.
 00-preflight          # no cluster changes; do this first
 t3-isolation          # cheapest smoke test
 t0-checksum           # produces the artifacts + baseline checksum for t2/t4
-t1-native-restore     # run TWICE: pre-merge control node, then merged node
+t1a-native-restore    # cheap; also the control for t1b
+t1b-fluidcr-app       # the real application-level test
 t4-dispatch           # needs t0 + t1 artifacts
 t2-crossnode-system   # needs t0 artifacts on the shared mount
 ```
@@ -71,18 +73,8 @@ Everything is env-driven; defaults live at the top of `lib/common.sh`.
 | `NS` | `default` | namespace |
 | `TIMEOUT` | `300` | per-wait timeout, seconds |
 
-Tests that touch FluidCR need these; there are no sensible defaults, so they
-fail fast if unset:
-
-| Variable | Meaning |
-|---|---|
-| `FLUIDCR_IMAGE` | the FluidCR-enabled training image |
-| `FLUIDCR_CHECKPOINT_PATH` | local checkpoint path for FluidCR's native restore |
-| `APP_PAYLOAD` | FluidCR payload name on the share (`t5`) |
-
-`t1-fluidcr-regression/00-source-pod.yaml` is deliberately a skeleton — copy the
-volume mounts and env from the FluidCR pod that worked before the merge. A
-regression test is only meaningful if the pod is otherwise identical.
+No FluidCR-specific variables are needed: `t1b` installs `fluidcr` from PyPI
+inside the pod.
 
 ## Running
 
@@ -94,16 +86,14 @@ sudo ./00-preflight/run.sh
 ./t3-isolation/run.sh
 ./t0-checksum/run.sh
 
-# A/B — the two result dirs should agree
-TARGET_NODE=$CONTROL_NODE FLUIDCR_IMAGE=... FLUIDCR_CHECKPOINT_PATH=... ./t1-fluidcr-regression/run.sh
-TARGET_NODE=$MERGED_NODE  FLUIDCR_IMAGE=... FLUIDCR_CHECKPOINT_PATH=... ./t1-fluidcr-regression/run.sh
-diff -r results/*-t1-fluidcr-jsj-worker-2 results/*-t1-fluidcr-jsj-worker-1
+TARGET_NODE=$MERGED_NODE ./t1a-native-restore/run.sh
+TARGET_NODE=$MERGED_NODE ./t1b-fluidcr-app/run.sh
 
-export SOURCE_POD_UID=$(cat results/*-t0-checksum/…)   # printed by t0
+export CKPT_PATH=$(cat results/*-t1a-native-*/ckpt-path)
+export SOURCE_POD_UID=$(cat results/*-t0-checksum/source-pod-uid)
 export CHECKSUM_BEFORE=$(cat results/*-t0-checksum/checksum.before)
 ./t4-dispatch/run.sh
 ./t2-crossnode-system/run.sh
-APP_PAYLOAD=appckpt-1 ./t5-crossnode-app/run.sh
 ```
 
 ### Where to run each test
