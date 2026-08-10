@@ -26,7 +26,15 @@ spec:
   restartPolicy: Never
   containers:
     - name: cuda-app
-      image: /var/lib/gpu-cr/restore/cuda-app-Checkpoint.tar
+      # kubelet parses and validates this BEFORE CRI-O ever sees the request, so it
+      # must be a normal OCI reference — an absolute path is rejected with
+      # InvalidImageName ("repository name must be lowercase" / invalid reference
+      # format). The real archive path is substituted inside CRI-O:
+      # stageGPUCheckpoint() runs at the top of CreateContainer, stages
+      # gpu-cr.io/checkpoint-uri onto the node and rewrites cfg.Image to the local
+      # tar, after which CRI-O's own "local archive" detection drives the restore.
+      # So any image kubelet accepts works here; this one is already on the node.
+      image: pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
       resources:
         limits:
           nvidia.com/gpu: "1"

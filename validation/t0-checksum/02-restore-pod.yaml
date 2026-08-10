@@ -1,7 +1,7 @@
 # T0 — same-node restore through the MERGED CRI-O (system / CRIUgpu path).
 #
-#   image                     = the local archive path AFTER staging
-#   gpu-cr.io/checkpoint-uri  = where the merged CRI-O stages that archive FROM
+#   image                     = ANY image kubelet accepts; CRI-O replaces it
+#   gpu-cr.io/checkpoint-uri  = where the merged CRI-O stages the archive FROM
 #   gpu-cr.io/source-pod-uid  = original Pod UID; CRIU restores the original env,
 #                               so the in-Pod interceptor watches THAT uid's
 #                               control channel for the data.blob remap signal
@@ -23,7 +23,15 @@ spec:
   restartPolicy: Never
   containers:
     - name: cuda-app
-      image: /var/lib/gpu-cr/restore/cuda-app-Checkpoint.tar
+      # kubelet parses and validates this BEFORE CRI-O ever sees the request, so it
+      # must be a normal OCI reference — an absolute path is rejected with
+      # InvalidImageName ("repository name must be lowercase" / invalid reference
+      # format). The real archive path is substituted inside CRI-O:
+      # stageGPUCheckpoint() runs at the top of CreateContainer, stages
+      # gpu-cr.io/checkpoint-uri onto the node and rewrites cfg.Image to the local
+      # tar, after which CRI-O's own "local archive" detection drives the restore.
+      # So any image kubelet accepts works here; this one is already on the node.
+      image: pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
       resources:
         limits:
           nvidia.com/gpu: "1"

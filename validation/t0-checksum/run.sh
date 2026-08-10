@@ -17,6 +17,9 @@ kubectl -n "$NS" delete gpucheckpoint.gpu-cr.io t0-ckpt --ignore-not-found >/dev
 render_manifest "$HERE/00-source-pod.yaml" | tee "$OUTDIR/source-pod.yaml" | kubectl apply -f -
 check "source pod reached Running" wait_pod_phase t0-cuda-checksum Running
 check "source pod printed READY (GPU allocated)" wait_log t0-cuda-checksum 'READY gpu_alloc' 300
+# The first CHECKSUM line trails READY by a second or two (sha256 over 512 MiB),
+# so wait for it explicitly instead of racing it.
+check "source pod emitted its first CHECKSUM" wait_log t0-cuda-checksum 'CHECKSUM [0-9a-f]{64}' 120
 
 kubectl -n "$NS" logs t0-cuda-checksum 2>/dev/null | grep -q 'interceptor loaded' \
   && ok "interceptor loaded" \
