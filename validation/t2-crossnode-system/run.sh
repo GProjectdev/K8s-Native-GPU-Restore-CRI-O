@@ -5,10 +5,15 @@
 # checksum), copy BOTH artifacts to the share, then run this. Every sample so
 # far used node-local hostpath://, so this is what actually justifies staging.
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/common.sh"
-: "${SOURCE_POD_UID:?export SOURCE_POD_UID from the t0 run}"
-: "${CHECKSUM_BEFORE:?export CHECKSUM_BEFORE (results/*-t0-checksum/checksum.before)}"
+# Read from the newest t0 results dir. Never glob-cat several of them.
+T0DIR="${T0DIR:-$(latest_result t0-checksum)}"
+info "t0 artifacts from: ${T0DIR:-<none>}"
+SOURCE_POD_UID="${SOURCE_POD_UID:-$(read_artifact "$T0DIR" source-pod-uid)}"
+CHECKSUM_BEFORE="${CHECKSUM_BEFORE:-$(read_artifact "$T0DIR" checksum.before)}"
+CKPT_TAR="${CKPT_TAR:-$(read_artifact "$T0DIR" ckpt-tar)}"
+require_single_token SOURCE_POD_UID  "$SOURCE_POD_UID"  || finish
+require_single_token CHECKSUM_BEFORE "$CHECKSUM_BEFORE" || finish
 RESTORE_NODE="${RESTORE_NODE:-$CONTROL_NODE}"
-CKPT_TAR="${CKPT_TAR:-Checkpoint.tar}"
 export SOURCE_POD_UID CKPT_TAR RESTORE_NODE MERGED_NODE NFS_ENDPOINT NFS_PATH
 
 outdir t2-crossnode-system

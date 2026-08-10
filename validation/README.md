@@ -88,9 +88,10 @@ sudo ./00-preflight/run.sh
 
 TARGET_NODE=$MERGED_NODE ./t1b-fluidcr-app/run.sh
 
-export CKPT_PATH=$(cat results/*-t1b-fluidcr-*/ckpt-path)
-export SOURCE_POD_UID=$(cat results/*-t0-checksum/source-pod-uid)
-export CHECKSUM_BEFORE=$(cat results/*-t0-checksum/checksum.before)
+# t4 and t2 read what they need from the newest results dir of the test that
+# produced it. Do NOT export these by hand with a glob -- a rerun leaves several
+# matching directories and `cat results/*-t0-checksum/source-pod-uid` will
+# concatenate two UIDs into one annotation.
 ./t4-dispatch/run.sh
 ./t2-crossnode-system/run.sh
 ```

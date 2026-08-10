@@ -74,6 +74,28 @@ announce_journal_hint() { # announce_journal_hint <node> <since>
   fi
 }
 
+# ---- reading artifacts from earlier tests ------------------------------------
+# Never `cat results/*-<test>/<file>`: a rerun leaves several matching dirs and
+# the glob concatenates them. Always take the newest.
+latest_result() {   # latest_result <dir-suffix-glob>   -> newest matching dir
+  ls -1dt "${RESULTS_ROOT}"/*-$1 2>/dev/null | head -1
+}
+
+read_artifact() {   # read_artifact <dir> <filename>    -> first line, trimmed
+  [ -n "$1" ] && [ -f "$1/$2" ] || return 1
+  head -1 "$1/$2" | tr -d '[:space:]'
+}
+
+# A value that should be a single token. Catches the concatenated-glob mistake.
+require_single_token() {  # require_single_token <name> <value>
+  case "$2" in
+    "" ) fail "$1 is empty"; return 1 ;;
+    *[[:space:]]* ) fail "$1 contains whitespace — looks like several files were concatenated: '$2'"
+                    warn "  use the newest results dir only (latest_result)"; return 1 ;;
+  esac
+  return 0
+}
+
 # ---- kube helpers -------------------------------------------------------------
 wait_pod_phase() { # wait_pod_phase <pod> <phase> [timeout]
   local pod="$1" want="$2" t="${3:-$TIMEOUT}" i=0 cur=
