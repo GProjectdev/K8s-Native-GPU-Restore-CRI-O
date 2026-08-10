@@ -268,3 +268,36 @@ application checkpoint into RAM so CRIU carries it inside the container tar
 upstream README). The tar is self-contained, so cross-node restore is upstream
 behaviour rather than something this work adds. It is future development, not a
 validation item.
+
+**t1b-fluidcr-app: PASSED 2026-08-10 (jsj-worker-1).** Application-level
+checkpoint/restore works on the merged CRI-O, and it works on **stock CRIU** —
+`criu 4.2.1-1ppa1.22.04` from the Ubuntu PPA, not the `leehun-criu` fork the
+FluidCR README asks for.
+
+The sequence, all of it observed:
+
+```
+STEP epoch=0 step=1140 loss=0.083335        training under fluidcr-launcher
+PID 53: checkpoint-ready                    fluidcr-ctrl checkpoint --all
+/checkpoint/53/latest.pt  (418 KB)          the state_dict
+/checkpoint/53/lock                         "safe to snapshot"
+checkpoint-...-trainer-...tar               kubelet checkpoint API
+--- restore ---
+TRAINING_START                              worker respawned
+STEP epoch=0 step=1260 loss=0.075875        <-- not step 0
+```
+
+**The evidence is the first step after the respawn, not the last step.** FluidCR
+respawns the worker rather than resuming the process (SIGUSR1 -> save -> exit 99;
+the launcher restarts `train.py` and the payload fast-forwards the DataLoader),
+so a second `TRAINING_START` is expected and is *not* a cold start. A cold start
+would print `step=0` right after it. This run printed `step=1260`, and the loss
+continued its downward trend from 0.083 to 0.076 — the model and the data
+position both survived.
+
+Two checks in the first version of this test were wrong and have been fixed:
+`TRAINING_START` was asserted to appear once (GCR semantics, not FluidCR's), and
+`CRImportCheckpointFromPath` was grepped for in the journal even though it is a
+function name CRI-O never logs at info level. Neither failure reflected the
+system under test. Comparing the *last* step before and after is also too weak on
+its own: at ~45 steps/s a cold start reaches a similar number within the wait.

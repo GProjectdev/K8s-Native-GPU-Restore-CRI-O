@@ -93,18 +93,42 @@ info "before checkpoint : ${LAST_STEP_LINE:-<none>}"
 info "after restore     : ${RESUMED:-<none>}"
 
 check "restored pod emitted STEP lines" test -n "$RESUMED"
-# A cold start would print TRAINING_START a second time.
-check "no second TRAINING_START (not a cold start)" \
-      test "$(grep -c 'TRAINING_START' "$OUTDIR/restore-pod.log" 2>/dev/null || echo 0)" -le 1
+
+# FluidCR RESPAWNS the worker: SIGUSR1 -> save state_dict -> exit 99, then on
+# restore the launcher starts train.py again and the payload fast-forwards the
+# DataLoader. So a second TRAINING_START is EXPECTED -- it is not a cold start.
+# (GCR is the opposite: the same process resumes mid-execution.)
+STARTS="$(grep -c 'TRAINING_START' "$OUTDIR/restore-pod.log" 2>/dev/null || echo 0)"
+info "TRAINING_START count = $STARTS (2 is correct: original + respawn)"
+
+# THE discriminator: the first STEP printed after the respawn. A cold start
+# begins at step=0; a genuine resume begins near the checkpointed step, because
+# FluidCR patched enumerate() to skip ahead.
+FIRST_AFTER="$(awk '/TRAINING_START/{n++} n==2 && /^STEP /{print; exit}' "$OUTDIR/restore-pod.log")"
+FIRST_AFTER_STEP="$(echo "$FIRST_AFTER" | sed -n 's/.*step=\([0-9]*\).*/\1/p')"
+echo "$FIRST_AFTER" > "$OUTDIR/step.first-after-respawn"
+info "first step after respawn: ${FIRST_AFTER:-<none>}"
+check "the respawned worker did NOT start at step 0 (DataLoader was fast-forwarded)" \
+      test "${FIRST_AFTER_STEP:-0}" -gt 0
+check "it picked up near the checkpointed step (${LAST_STEP:-?} -> ${FIRST_AFTER_STEP:-?})" \
+      test "${FIRST_AFTER_STEP:-0}" -ge "${LAST_STEP:-1}"
+
 AFTER_STEP="$(echo "$RESUMED" | sed -n 's/.*step=\([0-9]*\).*/\1/p')"
-check "resumed at or beyond the checkpointed step (${LAST_STEP:-?} -> ${AFTER_STEP:-?})" \
-      test "${AFTER_STEP:-0}" -ge "${LAST_STEP:-1}"
+check "training kept progressing after the restore" \
+      test "${AFTER_STEP:-0}" -ge "${FIRST_AFTER_STEP:-1}"
 
 node_journal "$TARGET_NODE" "$SINCE" "$OUTDIR/crio.log"
 if require_journal "$OUTDIR/crio.log" "$TARGET_NODE"; then
-  check "took CRImportCheckpointFromPath (application path)" \
-        grep -q 'CRImportCheckpointFromPath' "$OUTDIR/crio.log"
-  check "no gpu-cr staging for this pod" not grep -q 'gpu-cr:' "$OUTDIR/crio.log"
+  # CRImportCheckpointFromPath is a function name; CRI-O does not print it at
+  # info level, so grepping for it always failed. What the journal does show is
+  # the container being created for this pod, and -- crucially -- the ABSENCE of
+  # gpu-cr staging, which is what distinguishes this from the system path.
+  check "CRI-O created the restored container" \
+        grep -q "Creating container: ${NS}/t1b-fluidcr-restore/trainer" "$OUTDIR/crio.log"
+  check "no gpu-cr staging for this pod (system path not taken)" \
+        not grep -q 'gpu-cr:' "$OUTDIR/crio.log"
+  check "no GCR archive detection either" \
+        not grep -q 'Assuming it is a checkpoint archive' "$OUTDIR/crio.log"
 fi
 
 kubectl -n "$NS" delete pod t1b-fluidcr-restore --ignore-not-found >/dev/null 2>&1 || true
