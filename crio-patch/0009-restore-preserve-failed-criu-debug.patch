@@ -1,0 +1,78 @@
+diff --git a/internal/oci/runtime_oci.go b/internal/oci/runtime_oci.go
+index bb679e7..36ea8fc 100644
+--- a/internal/oci/runtime_oci.go
++++ b/internal/oci/runtime_oci.go
+@@ -315,6 +315,7 @@ func (r *runtimeOCI) CreateContainer(ctx context.Context, c *Container, cgroupPa
+ 			if ss.si.Message != "" {
+ 				if restore {
+ 					log.Errorf(ctx, "Container restore error: %s", ss.si.Message)
++					preserveGPURestoreDebug(ctx, c, ss.si.Message)
+ 
+ 					return fmt.Errorf("container restore failed: %s", ss.si.Message)
+ 				}
+@@ -342,6 +343,65 @@ func (r *runtimeOCI) CreateContainer(ctx context.Context, c *Container, cgroupPa
+ 	return nil
+ }
+ 
++func preserveGPURestoreDebug(ctx context.Context, c *Container, message string) {
++	out := filepath.Join("/var/lib/gpu-cr/debug", fmt.Sprintf("%s-%d", c.ID(), time.Now().UnixNano()))
++	if err := os.MkdirAll(out, 0o755); err != nil {
++		log.Warnf(ctx, "gpu-cr: create restore debug dir %s: %v", out, err)
++		return
++	}
++
++	copyPathForDebug(ctx, c.bundlePath, filepath.Join(out, "bundle"))
++	copyPathForDebug(ctx, c.dir, filepath.Join(out, "container-dir"))
++
++	if restoreLog := restoreLogPathFromMessage(message); restoreLog != "" {
++		if parent := filepath.Dir(filepath.Dir(restoreLog)); parent != "." && parent != "/" {
++			copyPathForDebug(ctx, parent, filepath.Join(out, "reported-overlay-container"))
++		}
++		if data, err := os.ReadFile(restoreLog); err == nil {
++			if err := os.WriteFile(filepath.Join(out, "restore.log"), data, 0o644); err != nil {
++				log.Warnf(ctx, "gpu-cr: copy restore.log into %s: %v", out, err)
++			}
++		}
++	}
++
++	log.Warnf(ctx, "gpu-cr: preserved failed restore debug data at %s", out)
++}
++
++func copyPathForDebug(ctx context.Context, src, dst string) {
++	if src == "" {
++		return
++	}
++	if _, err := os.Stat(src); err != nil {
++		log.Warnf(ctx, "gpu-cr: restore debug source %s unavailable: %v", src, err)
++		return
++	}
++	if err := exec.Command("cp", "-a", src, dst).Run(); err != nil {
++		log.Warnf(ctx, "gpu-cr: copy restore debug source %s to %s: %v", src, dst, err)
++	}
++}
++
++func restoreLogPathFromMessage(message string) string {
++	for _, prefix := range []string{
++		"/run/containers/storage/overlay-containers/",
++		"/var/lib/containers/storage/overlay-containers/",
++	} {
++		start := strings.Index(message, prefix)
++		if start < 0 {
++			continue
++		}
++		end := start
++		for end < len(message) {
++			switch message[end] {
++			case '`', '\'', '"', ' ', '\n', '\t':
++				return message[start:end]
++			}
++			end++
++		}
++		return message[start:end]
++	}
++	return ""
++}
++
+ // StartContainer starts a container.
+ func (r *runtimeOCI) StartContainer(ctx context.Context, c *Container) error {
+ 	_, span := log.StartSpan(ctx)
