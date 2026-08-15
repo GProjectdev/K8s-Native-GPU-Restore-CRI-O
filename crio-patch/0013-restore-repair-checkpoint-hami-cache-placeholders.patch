@@ -1,0 +1,84 @@
+diff --git a/internal/oci/runtime_oci.go b/internal/oci/runtime_oci.go
+index cea1722..8dab2d4 100644
+--- a/internal/oci/runtime_oci.go
++++ b/internal/oci/runtime_oci.go
+@@ -404,12 +404,14 @@ func restoreLogPathFromMessage(message string) string {
+ }
+ 
+ func repairHAMiCachePlaceholdersFromRestoreLog(ctx context.Context, c *Container, data []byte) {
+-	cacheFiles := hamiCacheFilesFromRestoreLog(string(data))
++	restoreLog := string(data)
++	cacheFiles := hamiCacheFilesFromRestoreLog(restoreLog)
+ 	if len(cacheFiles) == 0 {
+ 		return
+ 	}
+ 
+ 	vgpuSources := hamiVGPUHostSourcesFromBundle(ctx, c)
++	vgpuSources = appendUniqueStrings(vgpuSources, hamiVGPUHostSourcesFromRestoreLog(restoreLog)...)
+ 	if len(vgpuSources) == 0 {
+ 		log.Warnf(ctx, "gpu-cr: restore log references HAMi cache files %v but no /usr/local/vgpu host source was found", cacheFiles)
+ 		return
+@@ -474,6 +476,41 @@ func hamiCacheFilesFromRestoreLog(data string) []string {
+ 	return out
+ }
+ 
++func hamiVGPUHostSourcesFromRestoreLog(data string) []string {
++	seen := map[string]bool{}
++	var out []string
++	for _, prefix := range []string{
++		"/usr/local/vgpu/containers/",
++		"/usr/local/vgpu/restore-cache/",
++	} {
++		start := 0
++		for {
++			idx := strings.Index(data[start:], prefix)
++			if idx < 0 {
++				break
++			}
++			idx += start
++			end := idx
++			for end < len(data) {
++				switch data[end] {
++				case ' ', '\n', '\t', ':', '\'', '"', '`':
++					goto found
++				}
++				end++
++			}
++		found:
++			src := strings.TrimRight(data[idx:end], ".;,")
++			start = end
++			if src == "" || strings.Contains(src, "..") || seen[src] {
++				continue
++			}
++			seen[src] = true
++			out = append(out, src)
++		}
++	}
++	return out
++}
++
+ func hamiVGPUHostSourcesFromBundle(ctx context.Context, c *Container) []string {
+ 	configPath := filepath.Join(c.bundlePath, "config.json")
+ 	data, err := os.ReadFile(configPath)
+@@ -508,6 +545,21 @@ func hamiVGPUHostSourcesFromBundle(ctx context.Context, c *Container) []string {
+ 	return out
+ }
+ 
++func appendUniqueStrings(base []string, values ...string) []string {
++	seen := map[string]bool{}
++	for _, value := range base {
++		seen[value] = true
++	}
++	for _, value := range values {
++		if value == "" || seen[value] {
++			continue
++		}
++		seen[value] = true
++		base = append(base, value)
++	}
++	return base
++}
++
+ // StartContainer starts a container.
+ func (r *runtimeOCI) StartContainer(ctx context.Context, c *Container) error {
+ 	_, span := log.StartSpan(ctx)
