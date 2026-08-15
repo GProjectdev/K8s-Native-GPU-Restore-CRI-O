@@ -1,0 +1,78 @@
+diff --git a/server/container_restore.go b/server/container_restore.go
+index 94bbbb8..d63d999 100644
+--- a/server/container_restore.go
++++ b/server/container_restore.go
+@@ -6,6 +6,7 @@ import (
+ 	"errors"
+ 	"fmt"
+ 	"os"
++	"path/filepath"
+ 	"strings"
+ 
+ 	metadata "github.com/checkpoint-restore/checkpointctl/lib"
+@@ -383,6 +384,24 @@ func (s *Server) CRImportCheckpoint(
+ 		)
+ 	}
+ 
++	// gpu-cr: CRI-O's bind-mount presence check above only rebuilds the CRI
++	// mount list. CRIU still needs every checkpointed external bind mount in its
++	// own restore config. This is especially important for NVIDIA Container
++	// Toolkit mounts and HAMi mounts such as /etc/ld.so.preload, /usr/local/vgpu,
++	// and /usr/local/vgpu/libvgpu.so. Without these entries, crun reports
++	// "CRIU restoring failed -52" and may remove the restore.log during cleanup.
++	if createConfig.GetAnnotations()["gpu-cr.io/restore"] == "true" {
++		criuCfg, err := writeGPURestoreCRIUConfig(containerConfig.Mounts, createConfig.Metadata.Name)
++		if err != nil {
++			return "", err
++		}
++		if containerConfig.Annotations == nil {
++			containerConfig.Annotations = map[string]string{}
++		}
++		containerConfig.Annotations["org.criu.config"] = criuCfg
++		log.Infof(ctx, "gpu-cr: wrote restore CRIU config with %d external mounts to %s", len(containerConfig.Mounts), criuCfg)
++	}
++
+ 	sandboxConfig := &types.PodSandboxConfig{
+ 		Metadata: &types.PodSandboxMetadata{
+ 			Name:      sb.Metadata().Name,
+@@ -466,3 +485,40 @@ func (s *Server) CRImportCheckpoint(
+ 
+ 	return ctr.ID(), nil
+ }
++
++func writeGPURestoreCRIUConfig(mounts []*types.Mount, name string) (string, error) {
++	if strings.TrimSpace(name) == "" {
++		name = "restore"
++	}
++	name = strings.NewReplacer("/", "_", "\\", "_", ":", "_").Replace(name)
++
++	dir := "/var/lib/gpu-cr/restore"
++	if err := os.MkdirAll(dir, 0o755); err != nil {
++		return "", fmt.Errorf("create gpu-cr restore config dir: %w", err)
++	}
++
++	path := filepath.Join(dir, name+"-criu-restore.conf")
++	lines := []string{
++		"tcp-close",
++		"ext-unix-sk",
++	}
++	seen := map[string]bool{}
++	for _, m := range mounts {
++		if m == nil || m.HostPath == "" || m.ContainerPath == "" {
++			continue
++		}
++		if !filepath.IsAbs(m.HostPath) || !filepath.IsAbs(m.ContainerPath) {
++			continue
++		}
++		entry := fmt.Sprintf("external mnt[%s]:%s", m.HostPath, m.ContainerPath)
++		if seen[entry] {
++			continue
++		}
++		seen[entry] = true
++		lines = append(lines, entry)
++	}
++	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
++		return "", fmt.Errorf("write gpu-cr restore CRIU config: %w", err)
++	}
++	return path, nil
++}
