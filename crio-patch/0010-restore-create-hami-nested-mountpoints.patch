@@ -1,0 +1,66 @@
+diff --git a/server/container_restore.go b/server/container_restore.go
+index c6f6863..5ef4654 100644
+--- a/server/container_restore.go
++++ b/server/container_restore.go
+@@ -401,6 +401,12 @@ func (s *Server) CRImportCheckpoint(
+ 		)
+ 	}
+ 
++	if gpuCRRestore {
++		if err := ensureHAMiNestedMountpoints(containerConfig.Mounts); err != nil {
++			return "", err
++		}
++	}
++
+ 	// gpu-cr: CRI-O's bind-mount presence check above only rebuilds the CRI
+ 	// mount list. CRIU still needs every checkpointed external bind mount in its
+ 	// own restore config. This is especially important for NVIDIA Container
+@@ -555,3 +561,48 @@ func mountOptionsReadOnly(options []string) bool {
+ func isTransientKubeletMount(hostPath string) bool {
+ 	return strings.HasPrefix(hostPath, "/var/lib/kubelet/pods/")
+ }
++
++func ensureHAMiNestedMountpoints(mounts []*types.Mount) error {
++	for _, parent := range mounts {
++		if parent == nil || !isHAMiVGPUContainerMount(parent) {
++			continue
++		}
++		for _, child := range mounts {
++			if child == nil || child == parent || child.ContainerPath == "" || child.HostPath == "" {
++				continue
++			}
++			prefix := strings.TrimRight(parent.ContainerPath, "/") + "/"
++			if !strings.HasPrefix(child.ContainerPath, prefix) {
++				continue
++			}
++			rel := strings.TrimPrefix(child.ContainerPath, prefix)
++			if rel == "" || strings.Contains(rel, "..") {
++				continue
++			}
++			target := filepath.Join(parent.HostPath, filepath.FromSlash(rel))
++			if info, err := os.Stat(child.HostPath); err == nil && info.IsDir() {
++				if err := os.MkdirAll(target, 0o755); err != nil {
++					return fmt.Errorf("create hami nested mountpoint %s: %w", target, err)
++				}
++				continue
++			}
++			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
++				return fmt.Errorf("create hami nested mountpoint parent %s: %w", filepath.Dir(target), err)
++			}
++			f, err := os.OpenFile(target, os.O_CREATE, 0o644)
++			if err != nil {
++				return fmt.Errorf("create hami nested mountpoint %s: %w", target, err)
++			}
++			if err := f.Close(); err != nil {
++				return fmt.Errorf("close hami nested mountpoint %s: %w", target, err)
++			}
++		}
++	}
++	return nil
++}
++
++func isHAMiVGPUContainerMount(m *types.Mount) bool {
++	return m.ContainerPath == "/usr/local/vgpu" &&
++		(strings.HasPrefix(m.HostPath, "/usr/local/vgpu/containers/") ||
++			strings.HasPrefix(m.HostPath, "/usr/local/vgpu/restore-cache/"))
++}
