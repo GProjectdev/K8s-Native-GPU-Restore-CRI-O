@@ -1,0 +1,50 @@
+diff --git a/server/container_restore.go b/server/container_restore.go
+index d63d999..fe74278 100644
+--- a/server/container_restore.go
++++ b/server/container_restore.go
+@@ -335,6 +335,7 @@ func (s *Server) CRImportCheckpoint(
+ 	// file/directory on the host with the user knowing as it will happen without specifying
+ 	// it in the container definition.
+ 	missingMount := []string{}
++	gpuCRRestore := createConfig.GetAnnotations()["gpu-cr.io/restore"] == "true"
+ 
+ 	for _, m := range dumpSpec.Mounts {
+ 		// Following mounts are ignored as they might point to the
+@@ -364,6 +365,15 @@ func (s *Server) CRImportCheckpoint(
+ 			break
+ 		}
+ 
++		if !bindMountFound && gpuCRRestore && filepath.IsAbs(m.Source) {
++			if _, err := os.Stat(m.Source); err == nil {
++				bindMountFound = true
++				mount.HostPath = m.Source
++				mount.Readonly = mountOptionsReadOnly(m.Options)
++				log.Infof(ctx, "gpu-cr: synthesized checkpoint bind mount %s -> %s", m.Source, m.Destination)
++			}
++		}
++
+ 		if !bindMountFound {
+ 			missingMount = append(missingMount, m.Destination)
+ 			// If one mount is missing we can skip over any further code as we have
+@@ -390,7 +400,7 @@ func (s *Server) CRImportCheckpoint(
+ 	// Toolkit mounts and HAMi mounts such as /etc/ld.so.preload, /usr/local/vgpu,
+ 	// and /usr/local/vgpu/libvgpu.so. Without these entries, crun reports
+ 	// "CRIU restoring failed -52" and may remove the restore.log during cleanup.
+-	if createConfig.GetAnnotations()["gpu-cr.io/restore"] == "true" {
++	if gpuCRRestore {
+ 		criuCfg, err := writeGPURestoreCRIUConfig(containerConfig.Mounts, createConfig.Metadata.Name)
+ 		if err != nil {
+ 			return "", err
+@@ -522,3 +532,12 @@ func writeGPURestoreCRIUConfig(mounts []*types.Mount, name string) (string, erro
+ 	}
+ 	return path, nil
+ }
++
++func mountOptionsReadOnly(options []string) bool {
++	for _, option := range options {
++		if option == "ro" {
++			return true
++		}
++	}
++	return false
++}
