@@ -1,0 +1,28 @@
+diff --git a/internal/oci/runtime_oci.go b/internal/oci/runtime_oci.go
+index 8dab2d4..646abfc 100644
+--- a/internal/oci/runtime_oci.go
++++ b/internal/oci/runtime_oci.go
+@@ -433,6 +433,10 @@ func repairHAMiCachePlaceholdersFromRestoreLog(ctx context.Context, c *Container
+ 				log.Warnf(ctx, "gpu-cr: close HAMi cache placeholder %s: %v", target, err)
+ 				continue
+ 			}
++			if err := os.Chmod(target, 0o666); err != nil {
++				log.Warnf(ctx, "gpu-cr: chmod HAMi cache placeholder %s: %v", target, err)
++				continue
++			}
+ 			log.Warnf(ctx, "gpu-cr: created HAMi cache placeholder %s for next restore retry", target)
+ 		}
+ 	}
+diff --git a/server/container_restore.go b/server/container_restore.go
+index 9267f19..50ffee4 100644
+--- a/server/container_restore.go
++++ b/server/container_restore.go
+@@ -720,5 +720,8 @@ func copyHAMiCacheFile(src, dst string) error {
+ 	if err := os.WriteFile(dst, data, 0o666); err != nil {
+ 		return fmt.Errorf("write hami cache file %s: %w", dst, err)
+ 	}
++	if err := os.Chmod(dst, 0o666); err != nil {
++		return fmt.Errorf("chmod hami cache file %s: %w", dst, err)
++	}
+ 	return nil
+ }
