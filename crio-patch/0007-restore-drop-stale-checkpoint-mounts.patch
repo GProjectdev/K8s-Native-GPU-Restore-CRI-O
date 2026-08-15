@@ -1,0 +1,18 @@
+diff --git a/server/container_restore.go b/server/container_restore.go
+index fe74278..086314e 100644
+--- a/server/container_restore.go
++++ b/server/container_restore.go
+@@ -336,6 +336,13 @@ func (s *Server) CRImportCheckpoint(
+ 	// it in the container definition.
+ 	missingMount := []string{}
+ 	gpuCRRestore := createConfig.GetAnnotations()["gpu-cr.io/restore"] == "true"
++	if gpuCRRestore {
++		// The checkpoint metadata contains bind mounts from the original Pod.
++		// Reusing them can leak stale kubelet pod paths into CRIU restore config.
++		// Rebuild the list from the restore Pod request plus synthesized stable
++		// host mounts below.
++		containerConfig.Mounts = nil
++	}
+ 
+ 	for _, m := range dumpSpec.Mounts {
+ 		// Following mounts are ignored as they might point to the
