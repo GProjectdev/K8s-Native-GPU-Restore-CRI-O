@@ -1,0 +1,63 @@
+diff --git a/server/container_restore.go b/server/container_restore.go
+index 5ef4654..2c21133 100644
+--- a/server/container_restore.go
++++ b/server/container_restore.go
+@@ -402,6 +402,9 @@ func (s *Server) CRImportCheckpoint(
+ 	}
+ 
+ 	if gpuCRRestore {
++		if err := ensureHAMiCheckpointNestedMountpoints(dumpSpec.Mounts); err != nil {
++			return "", err
++		}
+ 		if err := ensureHAMiNestedMountpoints(containerConfig.Mounts); err != nil {
+ 			return "", err
+ 		}
+@@ -606,3 +609,48 @@ func isHAMiVGPUContainerMount(m *types.Mount) bool {
+ 		(strings.HasPrefix(m.HostPath, "/usr/local/vgpu/containers/") ||
+ 			strings.HasPrefix(m.HostPath, "/usr/local/vgpu/restore-cache/"))
+ }
++
++func ensureHAMiCheckpointNestedMountpoints(mounts []spec.Mount) error {
++	for _, parent := range mounts {
++		if !isHAMiVGPUCheckpointMount(parent) {
++			continue
++		}
++		for _, child := range mounts {
++			if child.Destination == "" || child.Source == "" || child.Destination == parent.Destination {
++				continue
++			}
++			prefix := strings.TrimRight(parent.Destination, "/") + "/"
++			if !strings.HasPrefix(child.Destination, prefix) {
++				continue
++			}
++			rel := strings.TrimPrefix(child.Destination, prefix)
++			if rel == "" || strings.Contains(rel, "..") {
++				continue
++			}
++			target := filepath.Join(parent.Source, filepath.FromSlash(rel))
++			if info, err := os.Stat(child.Source); err == nil && info.IsDir() {
++				if err := os.MkdirAll(target, 0o755); err != nil {
++					return fmt.Errorf("create hami checkpoint nested mountpoint %s: %w", target, err)
++				}
++				continue
++			}
++			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
++				return fmt.Errorf("create hami checkpoint nested mountpoint parent %s: %w", filepath.Dir(target), err)
++			}
++			f, err := os.OpenFile(target, os.O_CREATE, 0o644)
++			if err != nil {
++				return fmt.Errorf("create hami checkpoint nested mountpoint %s: %w", target, err)
++			}
++			if err := f.Close(); err != nil {
++				return fmt.Errorf("close hami checkpoint nested mountpoint %s: %w", target, err)
++			}
++		}
++	}
++	return nil
++}
++
++func isHAMiVGPUCheckpointMount(m spec.Mount) bool {
++	return m.Destination == "/usr/local/vgpu" &&
++		(strings.HasPrefix(m.Source, "/usr/local/vgpu/containers/") ||
++			strings.HasPrefix(m.Source, "/usr/local/vgpu/restore-cache/"))
++}
