@@ -1,0 +1,124 @@
+diff --git a/internal/oci/runtime_oci.go b/internal/oci/runtime_oci.go
+index 36ea8fc..cea1722 100644
+--- a/internal/oci/runtime_oci.go
++++ b/internal/oci/runtime_oci.go
+@@ -361,6 +361,7 @@ func preserveGPURestoreDebug(ctx context.Context, c *Container, message string)
+ 			if err := os.WriteFile(filepath.Join(out, "restore.log"), data, 0o644); err != nil {
+ 				log.Warnf(ctx, "gpu-cr: copy restore.log into %s: %v", out, err)
+ 			}
++			repairHAMiCachePlaceholdersFromRestoreLog(ctx, c, data)
+ 		}
+ 	}
+ 
+@@ -402,6 +403,111 @@ func restoreLogPathFromMessage(message string) string {
+ 	return ""
+ }
+ 
++func repairHAMiCachePlaceholdersFromRestoreLog(ctx context.Context, c *Container, data []byte) {
++	cacheFiles := hamiCacheFilesFromRestoreLog(string(data))
++	if len(cacheFiles) == 0 {
++		return
++	}
++
++	vgpuSources := hamiVGPUHostSourcesFromBundle(ctx, c)
++	if len(vgpuSources) == 0 {
++		log.Warnf(ctx, "gpu-cr: restore log references HAMi cache files %v but no /usr/local/vgpu host source was found", cacheFiles)
++		return
++	}
++
++	for _, src := range vgpuSources {
++		for _, cacheFile := range cacheFiles {
++			target := filepath.Join(src, cacheFile)
++			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
++				log.Warnf(ctx, "gpu-cr: create HAMi cache placeholder parent %s: %v", filepath.Dir(target), err)
++				continue
++			}
++			f, err := os.OpenFile(target, os.O_CREATE, 0o644)
++			if err != nil {
++				log.Warnf(ctx, "gpu-cr: create HAMi cache placeholder %s: %v", target, err)
++				continue
++			}
++			if err := f.Close(); err != nil {
++				log.Warnf(ctx, "gpu-cr: close HAMi cache placeholder %s: %v", target, err)
++				continue
++			}
++			log.Warnf(ctx, "gpu-cr: created HAMi cache placeholder %s for next restore retry", target)
++		}
++	}
++}
++
++func hamiCacheFilesFromRestoreLog(data string) []string {
++	seen := map[string]bool{}
++	var out []string
++	for _, marker := range []string{
++		"usr/local/vgpu/",
++		"/usr/local/vgpu/",
++	} {
++		start := 0
++		for {
++			idx := strings.Index(data[start:], marker)
++			if idx < 0 {
++				break
++			}
++			idx += start
++			nameStart := idx + len(marker)
++			nameEnd := nameStart
++			for nameEnd < len(data) {
++				switch data[nameEnd] {
++				case ' ', '\n', '\t', ':', '\'', '"', '`':
++					goto found
++				}
++				nameEnd++
++			}
++		found:
++			name := data[nameStart:nameEnd]
++			start = nameEnd
++			if !strings.HasSuffix(name, ".cache") || strings.Contains(name, "/") || strings.Contains(name, "..") {
++				continue
++			}
++			if !seen[name] {
++				seen[name] = true
++				out = append(out, name)
++			}
++		}
++	}
++	return out
++}
++
++func hamiVGPUHostSourcesFromBundle(ctx context.Context, c *Container) []string {
++	configPath := filepath.Join(c.bundlePath, "config.json")
++	data, err := os.ReadFile(configPath)
++	if err != nil {
++		log.Warnf(ctx, "gpu-cr: read bundle config for HAMi cache repair %s: %v", configPath, err)
++		return nil
++	}
++
++	var spec struct {
++		Mounts []struct {
++			Source      string `json:"source"`
++			Destination string `json:"destination"`
++		} `json:"mounts"`
++	}
++	if err := json.Unmarshal(data, &spec); err != nil {
++		log.Warnf(ctx, "gpu-cr: parse bundle config for HAMi cache repair %s: %v", configPath, err)
++		return nil
++	}
++
++	seen := map[string]bool{}
++	var out []string
++	for _, m := range spec.Mounts {
++		if m.Destination != "/usr/local/vgpu" || m.Source == "" {
++			continue
++		}
++		if seen[m.Source] {
++			continue
++		}
++		seen[m.Source] = true
++		out = append(out, m.Source)
++	}
++	return out
++}
++
+ // StartContainer starts a container.
+ func (r *runtimeOCI) StartContainer(ctx context.Context, c *Container) error {
+ 	_, span := log.StartSpan(ctx)
