@@ -1,0 +1,83 @@
+diff --git a/server/container_restore.go b/server/container_restore.go
+index 2c21133..9267f19 100644
+--- a/server/container_restore.go
++++ b/server/container_restore.go
+@@ -408,6 +408,9 @@ func (s *Server) CRImportCheckpoint(
+ 		if err := ensureHAMiNestedMountpoints(containerConfig.Mounts); err != nil {
+ 			return "", err
+ 		}
++		if err := seedHAMiCacheFiles(containerConfig.Mounts, dumpSpec.Mounts); err != nil {
++			return "", err
++		}
+ 	}
+ 
+ 	// gpu-cr: CRI-O's bind-mount presence check above only rebuilds the CRI
+@@ -654,3 +657,68 @@ func isHAMiVGPUCheckpointMount(m spec.Mount) bool {
+ 		(strings.HasPrefix(m.Source, "/usr/local/vgpu/containers/") ||
+ 			strings.HasPrefix(m.Source, "/usr/local/vgpu/restore-cache/"))
+ }
++
++func seedHAMiCacheFiles(criMounts []*types.Mount, checkpointMounts []spec.Mount) error {
++	cacheSources, err := filepath.Glob("/usr/local/vgpu/restore-cache/*_selective-target/*.cache")
++	if err != nil {
++		return fmt.Errorf("scan hami restore-cache files: %w", err)
++	}
++	if len(cacheSources) == 0 {
++		return nil
++	}
++
++	targets := hamiVGPUSeedTargets(criMounts, checkpointMounts)
++	for _, targetDir := range targets {
++		if err := os.MkdirAll(targetDir, 0o755); err != nil {
++			return fmt.Errorf("create hami cache target dir %s: %w", targetDir, err)
++		}
++		for _, src := range cacheSources {
++			dst := filepath.Join(targetDir, filepath.Base(src))
++			if err := copyHAMiCacheFile(src, dst); err != nil {
++				return err
++			}
++		}
++	}
++	return nil
++}
++
++func hamiVGPUSeedTargets(criMounts []*types.Mount, checkpointMounts []spec.Mount) []string {
++	seen := map[string]bool{}
++	var out []string
++	add := func(path string) {
++		if path == "" || seen[path] {
++			return
++		}
++		if !(strings.HasPrefix(path, "/usr/local/vgpu/containers/") ||
++			strings.HasPrefix(path, "/usr/local/vgpu/restore-cache/")) {
++			return
++		}
++		seen[path] = true
++		out = append(out, path)
++	}
++	for _, m := range criMounts {
++		if m != nil && m.ContainerPath == "/usr/local/vgpu" {
++			add(m.HostPath)
++		}
++	}
++	for _, m := range checkpointMounts {
++		if m.Destination == "/usr/local/vgpu" {
++			add(m.Source)
++		}
++	}
++	return out
++}
++
++func copyHAMiCacheFile(src, dst string) error {
++	data, err := os.ReadFile(src)
++	if err != nil {
++		return fmt.Errorf("read hami cache file %s: %w", src, err)
++	}
++	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
++		return fmt.Errorf("create hami cache dst parent %s: %w", filepath.Dir(dst), err)
++	}
++	if err := os.WriteFile(dst, data, 0o666); err != nil {
++		return fmt.Errorf("write hami cache file %s: %w", dst, err)
++	}
++	return nil
++}
