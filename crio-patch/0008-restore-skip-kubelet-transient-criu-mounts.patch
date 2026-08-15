@@ -1,0 +1,22 @@
+diff --git a/server/container_restore.go b/server/container_restore.go
+index 086314e..c6f6863 100644
+--- a/server/container_restore.go
++++ b/server/container_restore.go
+@@ -527,6 +527,9 @@ func writeGPURestoreCRIUConfig(mounts []*types.Mount, name string) (string, erro
+ 		if !filepath.IsAbs(m.HostPath) || !filepath.IsAbs(m.ContainerPath) {
+ 			continue
+ 		}
++		if isTransientKubeletMount(m.HostPath) {
++			continue
++		}
+ 		entry := fmt.Sprintf("external mnt[%s]:%s", m.HostPath, m.ContainerPath)
+ 		if seen[entry] {
+ 			continue
+@@ -548,3 +551,7 @@ func mountOptionsReadOnly(options []string) bool {
+ 	}
+ 	return false
+ }
++
++func isTransientKubeletMount(hostPath string) bool {
++	return strings.HasPrefix(hostPath, "/var/lib/kubelet/pods/")
++}
