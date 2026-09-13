@@ -3,6 +3,11 @@
 English summary of `docs/SETUP.ko.md`. Restores a `Checkpoint.tar` into a new Pod
 via a patched CRI-O native restore path (patch targets CRI-O v1.33.x; build the version your node runs). Target: K8s v1.33+, driver 570+, crun >= 1.9.
 
+
+> **v1.0 = GCR-only:** control state is restored via the host `cuda-checkpoint` helper,
+> so ensure `/usr/bin/cuda-checkpoint` exists on every GPU node (set `CUDA_CHECKPOINT_BIN` to
+> override). The checkpoint must be produced by the checkpoint repo's `v1.0` (GCR-only) branch.
+
 ## 1. Build the Custom CRI-O (once)
 ```bash
 git clone https://github.com/GProjectdev/K8s-Native-GPU-Restore-CRI-O.git

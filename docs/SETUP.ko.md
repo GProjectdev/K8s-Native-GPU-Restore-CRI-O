@@ -14,6 +14,11 @@ NVIDIA 드라이버 570+, **crun ≥ 1.9**.
 - **노드 간 복원 시: source·target 노드의 NVIDIA 드라이버 버전이 동일해야 함**
   (예: 570.211.01). CRIUgpu(cuda_plugin) 복원의 근본 제약이자 드라이버 라이브러리 경로 일치 조건.
 
+
+> **v1.0 = GCR-only:** control state is restored via the host `cuda-checkpoint` helper,
+> so ensure `/usr/bin/cuda-checkpoint` exists on every GPU node (set `CUDA_CHECKPOINT_BIN` to
+> override). The checkpoint must be produced by the checkpoint repo's `v1.0` (GCR-only) branch.
+
 ## 1. Custom CRI-O 빌드 (빌드 호스트, 1회)
 ```bash
 git clone https://github.com/GProjectdev/K8s-Native-GPU-Restore-CRI-O.git
